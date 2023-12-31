@@ -44,6 +44,14 @@ String currentTime() {
 void setup() {
     Serial.begin(115200);
 
+    // Connect to WiFi
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.println("Connecting to WiFi...");
+    }
+    Serial.println("Connected to WiFi");
+
     // initialize I2C interfaces
     TwoWire mainWire = TwoWire(0);
     TwoWire fastWire = TwoWire(1);
