@@ -8,6 +8,7 @@
 #include <DHT.h>
 #include <RTClib.h>
 #include <NTPClient.h>
+//#include <esp_log.h>
 
 // network credentials
 const char* ssid = "tkNOC_IoT";
@@ -28,6 +29,8 @@ const int secondarySDA = 16;
 const int secondarySCL = 17;
 const int secondaryClockSpeed = 400000; //400kHz clock speed
 
+// logging settings
+// static const char *TAG = "Alarmanlage"; // Application Tag
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntpServer, gmtOffset_sec, daylightOffset_sec);
@@ -42,7 +45,9 @@ String currentTime() {
 }
 
 void setup() {
+    // initialize serial monitor and logging
     Serial.begin(115200);
+    //esp_log_level_set(TAG, ESP_LOG_INFO);
 
     // Connect to WiFi
     WiFi.begin(ssid, password);
@@ -68,7 +73,7 @@ void setup() {
     timeClient.begin();
     timeClient.update();
     rtc.adjust(DateTime(timeClient.getEpochTime()));
-
+    Serial.println("Initialized RTC, current time: ");
     Serial.println(currentTime());
 }
 
