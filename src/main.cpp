@@ -57,7 +57,7 @@ TaskHandle_t lcdTask;
 String currentTime() {
     DateTime now = rtc.now();
     char buffer[20]; // Buffer for formatted time
-    sprintf(buffer, "%02d/%02d/%04d %02d:%02d", now.day(), now.month(), now.year(), now.hour(), now.minute());
+    sprintf(buffer, "%02d/%02d/%04d %02d:%02d:%02d", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
     return String(buffer);
 }
 
