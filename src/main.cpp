@@ -38,6 +38,11 @@ const int vspi_clk_pin = 18;
 const int vspi_ss_pin = 5;
 const int rfid_rst_pin = 4;
 
+// Pin settings
+const int arm_button_pin = 0; // for arming and disarming alarm system (disarming requires rfid chip)
+const int reset_alarm_pin = 2; // for resetting an alarm (requires rfid chip)
+const int rfid_setting_pin = 15; // for adding and removing rfid chips (requires rfid chip after first chip is added)
+
 // logging settings
 // static const char *TAG = "Alarmanlage"; // Application Tag
 
@@ -53,6 +58,8 @@ RTC_DS1307 rtc; // DS1307 RTC
 LiquidCrystal_I2C lcd(0x27, 20, 4); // I2C LCD
 //DHT dht(dht_pin, DHT11); // DHT Temperature sensor
 
+// variables
+bool ARMED = false;
 
 // task handles
 
@@ -119,6 +126,9 @@ void setup() {
     // initialize secondary I2C bus
     fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
 
+    // initialize SPI bus
+    SPI.begin(vspi_clk_pin, vspi_miso_pin, vspi_mosi_pin, vspi_ss_pin);
+
     // Initialize RTC and synchronize with NTP
     if (!rtc.begin(&Wire)) {
         Serial.println("Could not find valid rtc, check wiring!");
@@ -129,6 +139,10 @@ void setup() {
     rtc.adjust(DateTime(timeClient.getEpochTime()));
     Serial.println("Initialized RTC, current time: ");
     Serial.println(currentTime());
+
+    // Initialize RFID module
+    RFID_RC522 rfid;
+    rfid.begin();
 
     xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
     delay(500);
