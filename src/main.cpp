@@ -32,10 +32,22 @@ const int secondaryClockSpeed = 400000; //400kHz clock speed
 // logging settings
 // static const char *TAG = "Alarmanlage"; // Application Tag
 
+// sensor pin settings
+const int dht_pin = 4;
+
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntpServer, gmtOffset_sec, daylightOffset_sec);
+RTC_DS1307 rtc; // DS1307 RTC
+LiquidCrystal_I2C lcd(0x27, 20, 4); // I2C LCD
+//DHT dht(dht_pin, DHT11); // DHT Temperature sensor
 
-RTC_DS1307 rtc;
+
+// task handles
+
+TaskHandle_t lcdTask;
+
+
+// --------- RTC FUNCTIONS ---------
 
 String currentTime() {
     DateTime now = rtc.now();
@@ -44,10 +56,37 @@ String currentTime() {
     return String(buffer);
 }
 
+// --------- LCD REFRESHER ---------
+
+void lcdJob(void * pvParameters) {
+    Serial.println(("lcd refresher running on core %d", xPortGetCoreID()));
+    for (;;) {
+        // line 1: current time
+        lcd.setCursor(0, 0);
+        lcd.print("Time: ");
+        lcd.print(currentTime());
+
+        // line 2: alarm status
+        lcd.setCursor(0, 1);
+
+        // line 3
+        lcd.setCursor(0, 2);
+
+        // line 4
+        lcd.setCursor(0, 3);
+        vTaskDelay(1000);
+    }
+}
+
+
+// --------- SETUP ---------
+
 void setup() {
     // initialize serial monitor and logging
     Serial.begin(115200);
     //esp_log_level_set(TAG, ESP_LOG_INFO);
+
+    Serial.println(("Setup Running on Core %d", xPortGetCoreID()));
 
     // Connect to WiFi
     WiFi.begin(ssid, password);
@@ -65,6 +104,11 @@ void setup() {
 
     fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
 
+    // initialize lcd display
+    lcd.init();
+    lcd.clear();
+    lcd.backlight();
+
     // Initialize RTC and synchronize with NTP
     if (!rtc.begin(&mainWire)) {
         Serial.println("Could not find valid rtc, check wiring!");
@@ -75,8 +119,14 @@ void setup() {
     rtc.adjust(DateTime(timeClient.getEpochTime()));
     Serial.println("Initialized RTC, current time: ");
     Serial.println(currentTime());
+
+    xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
+    delay(500);
+
+    Serial.println("Finished Setup");
 }
 
 void loop() {
+
 }
 
