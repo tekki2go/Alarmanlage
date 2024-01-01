@@ -10,7 +10,7 @@
 #include <NTPClient.h>
 //#include <esp_log.h>
 
-#include <rfid_library.h>
+//#include <rfid_library.h>
 
 // network credentials
 const char* ssid = "tkNOC_IoT";
