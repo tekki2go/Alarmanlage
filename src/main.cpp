@@ -31,6 +31,13 @@ const int secondarySDA = 16;
 const int secondarySCL = 17;
 const int secondaryClockSpeed = 400000; //400kHz clock speed
 
+// RFID reader pin settings
+const int vspi_mosi_pin = 23;
+const int vspi_miso_pin = 19;
+const int vspi_clk_pin = 18;
+const int vspi_ss_pin = 5;
+const int rfid_rst_pin = 4;
+
 // logging settings
 // static const char *TAG = "Alarmanlage"; // Application Tag
 
