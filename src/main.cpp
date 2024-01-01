@@ -35,6 +35,9 @@ const int secondaryClockSpeed = 400000; //400kHz clock speed
 // sensor pin settings
 const int dht_pin = 4;
 
+// initialize I2C interfaces
+TwoWire fastWire = TwoWire(1);
+
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntpServer, gmtOffset_sec, daylightOffset_sec);
 RTC_DS1307 rtc; // DS1307 RTC
@@ -63,7 +66,6 @@ void lcdJob(void * pvParameters) {
     for (;;) {
         // line 1: current time
         lcd.setCursor(0, 0);
-        lcd.print("Time: ");
         lcd.print(currentTime());
 
         // line 2: alarm status
@@ -96,21 +98,20 @@ void setup() {
     }
     Serial.println("Connected to WiFi");
 
-    // initialize I2C interfaces
-    TwoWire mainWire = TwoWire(0);
-    TwoWire fastWire = TwoWire(1);
+    // initialize main I2C bus
+    //mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
+    Wire.begin(mainSDA, mainSCL, mainClockSpeed);
 
-    mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
-
-    fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
-
-    // initialize lcd display
+    // initialize lcd display to use mainWire
     lcd.init();
     lcd.clear();
     lcd.backlight();
 
+    // initialize secondary I2C bus
+    fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
+
     // Initialize RTC and synchronize with NTP
-    if (!rtc.begin(&mainWire)) {
+    if (!rtc.begin(&Wire)) {
         Serial.println("Could not find valid rtc, check wiring!");
     }
     
