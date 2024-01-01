@@ -1,0 +1,24 @@
+Sensoren:
+- Lichtschranke
+- Mikrofon
+- Luftdruck
+- Temperatur und Luftfeuchtigkeit
+- Radar
+- Bewegung
+
+Sonstiges:
+- Kamera
+- RFID Reader
+- LEDs
+- LCD
+- Discord-Verknüpfung
+
+
+
+funktionen:
+- tag anlegen / löschen
+- alarm scharfstellen / deaktivieren
+- alarm beenden
+- Status: WLAN, 
+- SPRACHE: deutsch / englisch
+
