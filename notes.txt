@@ -1,0 +1,93 @@
+Sensoren:
+- Lichtschranke
+- Mikrofon
+- Luftdruck
+- Temperatur und Luftfeuchtigkeit
+- Radar
+- Bewegung
+
+Sonstiges:
+- Kamera
+- RFID Reader
+- Buzzer
+- LCD
+- Discord-Verknüpfung
+
+
+
+funktionen:
+- tag anlegen / löschen
+- alarm scharfstellen / deaktivieren
+- alarm beenden
+- Status: WLAN, 
+- SPRACHE: deutsch / englisch
+
+
+Input:
+Buttons: 5 DIN + GND
+RCWL-0516 (Radar): 1 DIN + GND, VCC
+Mikrofon: 1 DIN + GND, VCC
+Bewegung: 1 DIN + GND, VCC
+Lichtschranke: 1 DIN + GND
+= 9 inputs
+
+Output:
+LED ROT: 1 DOUT + GND
+LED GRÜN: 1 DOUT + GND
+Buzzer: 1 DOUT + GND
+= 3 outputs
+
+I/O:
+DHT11 Temperatur / Luftfeuchtigkeit: 1 I/O + GND, VCC
+= 1 I/O
+
+I2C:
+HW-611 Luftdruck: SDA + SDL, GND + VCC
+DS1307: SDA + SCL, GND + VCC
+LCD: SDA + SCL, GND + VCC
+
+Pin-Extender (fast!): SDA + SCL, GND + VCC
+= 2x I2C
+
+RFID: 
+SS, SCK, MOSI, MISO (I/O) + 1 RST DOUT
+= 4x I/O + 1 DOUT
+
+DIN: 9
+DOUT: 4
+I/O: 5
+I2C: 2 (4 pins)
+= 22 pins
+
+
+Pin-Configs:
+LCD, DS1307, HW-611:
+SDA: 21
+SCL: 22
+
+Pin extender:
+SDA: 16
+SCL: 17
+
+RFID reader:
+MOSI: 23
+MISO: 19
+CLK: 18
+SS: 5
+RST: 4
+
+Piezo beeper: 0
+LED ROT: 2
+LED GRÜN: 15
+
+Button 1: 32
+Button 2: 35
+Button 3: 34
+Button 4: 39
+Button 5: 36
+
+Lichtschranke: 33
+Radar: 25
+Mikrofon: 26
+DHT11: 27
+Bewegungsmelder: 14
