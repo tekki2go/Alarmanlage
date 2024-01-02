@@ -14,7 +14,6 @@ Sonstiges:
 - Discord-Verknüpfung
 
 
-
 funktionen:
 - tag anlegen / löschen
 - alarm scharfstellen / deaktivieren
@@ -86,8 +85,23 @@ Button 3: 34
 Button 4: 39
 Button 5: 36
 
+funktionen:
+- tag anlegen / löschen
+- alarm scharfstellen / deaktivieren
+- alarm beenden
+- Status: WLAN, 
+- SPRACHE: deutsch / englisch
+
 Lichtschranke: 33
 Radar: 25
 Mikrofon: 26
 DHT11: 27
 Bewegungsmelder: 14
+
+
+Todo:
+1. Buttons hinzufügen
+2. Statistiken hinzufügen
+3. Alarmfunktion
+4. Sensoren hinzufügen
+-

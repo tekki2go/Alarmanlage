@@ -1,15 +1,15 @@
 #include <Arduino.h>
-// FS libs
+// FS-Bibliotheken
 #include <SPIFFS.h>
 #include <FS.h>
 #include <SD.h>
-// networking
+// Netzwerk
 #include <WiFi.h>
 #include <WiFiUdp.h>
-// communication
+// Kommunikation
 #include <Wire.h>
 #include <SPI.h>
-// devices
+// Geräte
 #include <MFRC522.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
@@ -17,92 +17,94 @@
 #include <RTClib.h>
 #include <NTPClient.h>
 
-//#include <esp_log.h>
-
-// network credentials
+// Netzwerkdaten
 const char* ssid = "tkNOC_IoT";
 const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
 
-// NTP Server settings
+// NTP Server Einstellungen
 const char* ntpServer = "pool.ntp.org";
-const long gmtOffset_sec = 3600;  // GMT offset in seconds
-const int daylightOffset_sec = 3600; // Daylight offset in seconds
+const long gmtOffset_sec = 3600;  // GMT-Versatz in Sekunden
+const int daylightOffset_sec = 3600; // Sommerzeit-Versatz in Sekunden
 
-// I2C interface used for RTC, LCD and sensors (mainWire)
+// I2C-Schnittstelle für RTC, LCD und Sensoren (mainWire)
 const int mainSDA = 21;
 const int mainSCL = 22;
-const int mainClockSpeed = 100000; //100kHz Clock speed
+const int mainClockSpeed = 100000; // 100kHz Taktgeschwindigkeit
 
-// I2C interface used for high-speed, low-latency (later called fastWire)
+// I2C-Schnittstelle für Hochgeschwindigkeits-, Niedriglatenzkommunikation (später als fastWire bezeichnet)
 const int secondarySDA = 16;
 const int secondarySCL = 17;
-const int secondaryClockSpeed = 400000; //400kHz clock speed
+const int secondaryClockSpeed = 400000; // 400kHz Taktgeschwindigkeit
 
-// RFID reader settings
+// RFID-Lesegerät Einstellungen
 const int vspi_mosi_pin = 23;
 const int vspi_miso_pin = 19;
 const int vspi_clk_pin = 18;
 const int vspi_ss_pin = 5;
 const int rfid_rst_pin = 4;
 
-// Pin settings
-const int arm_button_pin = 0; // for arming and disarming alarm system (disarming requires rfid chip)
-const int reset_alarm_pin = 2; // for resetting an alarm (requires rfid chip)
-const int rfid_setting_pin = 15; // for adding and removing rfid chips (requires rfid chip after first chip is added)
+// Pin-Einstellungen
+const int piezo_pin = 0;
+const int led_red_pin = 2;
+const int led_green_pin = 15;
+const int arm_button_pin = 32;
+const int reset_alarm_button_pin = 35;
+const int status_button_pin = 34;
+const int tag_button_pin = 39;
+const int language_button_pin = 36;
 
-// logging settings
-// static const char *TAG = "Alarmanlage"; // Application Tag
+// Protokolleinstellungen
+// static const char *TAG = "Alarmanlage"; // Anwendungstag
 
-// sensor pin settings
+// Sensoreinstellungen für Pins
 const int dht_pin = 4;
 
-// initialize I2C interfaces
+// Initialisierung der I2C-Schnittstellen
 TwoWire fastWire = TwoWire(1);
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntpServer, gmtOffset_sec, daylightOffset_sec);
 RTC_DS1307 rtc; // DS1307 RTC
 LiquidCrystal_I2C lcd(0x27, 20, 4); // I2C LCD
-MFRC522 mfrc522(vspi_ss_pin, rfid_rst_pin); // RFID reader
-//DHT dht(dht_pin, DHT11); // DHT Temperature sensor
+MFRC522 mfrc522(vspi_ss_pin, rfid_rst_pin); // RFID-Lesegerät
+//DHT dht(dht_pin, DHT11); // DHT-Temperatursensor
 
-// variables
+// Variablen
 bool ARMED = false;
 
-// task handles
+// Task-Handles
 TaskHandle_t lcdTask;
 
-// functions
+// Funktionen
 void initial_setup(bool noFile);
 
-
-// --------- RTC FUNCTIONS ---------
+// --------- RTC-FUNKTIONEN ---------
 
 String currentTime() {
     DateTime now = rtc.now();
-    char buffer[20]; // Buffer for formatted time
+    char buffer[20]; // Puffer für formatierte Zeit
     sprintf(buffer, "%02d/%02d/%04d %02d:%02d:%02d", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
     return String(buffer);
 }
 
-// --------- LCD REFRESHER ---------
+// --------- LCD-AKTUALISIERUNG ---------
 
 void lcdJob(void * pvParameters) {
-    Serial.println(("lcd refresher running on core %d", xPortGetCoreID()));
+    Serial.println(("LCD-Aktualisierer läuft auf Core %d", xPortGetCoreID()));
     for (;;) {
-        // line 1: current time
+        // Zeile 1: aktuelle Zeit
         lcd.setCursor(0, 0);
         lcd.print(currentTime());
 
-        // line 2: IP
+        // Zeile 2: IP
         lcd.setCursor(0, 1);
         lcd.print("IP: ");
         lcd.print(WiFi.localIP());
 
-        // line 3: alarm status
+        // Zeile 3: Alarmstatus
         lcd.setCursor(0, 2);
 
-        // line 4
+        // Zeile 4
         lcd.setCursor(0, 3);
         vTaskDelay(pdMS_TO_TICKS(500));
     }
@@ -115,16 +117,16 @@ void rfid_init() {
 
     File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
 
-    // Check if whitelist file can be opened
+    // Überprüfung, ob die Whitelist-Datei geöffnet werden kann
     if (!whitelistFile) {
-        Serial.println("Whitelist file not found. Setup required.");
+        Serial.println("Whitelist-Datei nicht gefunden. Einrichtung erforderlich.");
         initial_setup(true);
         return;
     }
     
-    // Check if there are any tags in the whitelist
+    // Überprüfung, ob Tags in der Whitelist vorhanden sind
     if (whitelistFile.size() == 0) {
-        Serial.println("No tags in the whitelist. Setup required.");
+        Serial.println("Keine Tags in der Whitelist. Einrichtung erforderlich.");
         initial_setup(false);
     }
     
@@ -133,11 +135,11 @@ void rfid_init() {
 
 void save_tag() {
     for (;;) {
-        // check if card is present
+        // Überprüfen, ob eine Karte vorhanden ist
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
             File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "a");
             
-            // check if the whitelist exists and try to save the tag to it
+            // Überprüfen, ob die Whitelist existiert und versuchen, das Tag darin zu speichern
             if (whitelistFile) {
                 String tagData = "";
                 for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -145,9 +147,9 @@ void save_tag() {
                 }
                 whitelistFile.println(tagData);
                 whitelistFile.close();
-                Serial.println("Tag saved successfully.");
+                Serial.println("Tag erfolgreich gespeichert.");
             } else {
-                Serial.println("Failed to open whitelist file for writing.");
+                Serial.println("Fehler beim Öffnen der Whitelist-Datei zum Schreiben.");
             }
             return;
         }
@@ -156,7 +158,7 @@ void save_tag() {
 
 bool delete_tag() {
     for (;;) {
-        // check if card is present
+        // Überprüfen, ob eine Karte vorhanden ist
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
             String tagData = "";
             for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -166,7 +168,7 @@ bool delete_tag() {
             File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
             File tempFile = SPIFFS.open("/rfid/temp.txt", "w");
             
-            // check if the whitelist and tempfile exist and rewrite the whitelist by creating a temp file
+            // Überprüfen, ob die Whitelist und Temporärdatei existieren und die Whitelist neu schreiben, indem eine Temporärdatei erstellt wird
             if (whitelistFile && tempFile) {
                 String line;
                 while (whitelistFile.available()) {
@@ -191,7 +193,7 @@ bool delete_tag() {
 
 bool search_tag() {
     for (;;) {
-        // check if card is present
+        // Überprüfen, ob eine Karte vorhanden ist
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
             String tagData = "";
             for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -200,7 +202,7 @@ bool search_tag() {
             
             File whitelistFile = SPIFFS.open("/rfid/tags.txt", "r");
             
-            // look up if the tag exists in the file and return true if it is found
+            // Überprüfen, ob das Tag in der Datei vorhanden ist und wahr zurückgeben, wenn es gefunden wird
             if (whitelistFile) {
                 String line;
                 while (whitelistFile.available()) {
@@ -218,18 +220,18 @@ bool search_tag() {
     }
 }
 
-// --------- SETUP ---------
+// --------- EINRICHTUNG ---------
 
 void initial_setup(bool noFile) {
     if (noFile) {
         if (!SPIFFS.exists("/rfid")) {
             if (!SPIFFS.mkdir("/rfid")) {
-                Serial.println("Failed to create folder rfid!");
+                Serial.println("Ordner rfid konnte nicht erstellt werden!");
                 for (;;);
             }
             File file = SPIFFS.open("/rfid/rfid_tags.txt", "w");
             if (!file) {
-                Serial.println("Failed to create file rfid_flags.txt!");
+                Serial.println("Datei rfid_flags.txt konnte nicht erstellt werden!");
                 for (;;);
             }
             file.close();
@@ -237,7 +239,7 @@ void initial_setup(bool noFile) {
         }
     }
     
-    Serial.println("Please hold the first rfid tag to the reader!");
+    Serial.println("Bitte den RFID-Tag an den Leser halten!");
     save_tag();
 }
 
@@ -252,38 +254,38 @@ void setup() {
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-        Serial.println("Connecting to WiFi...");
+        Serial.println("Verbindung zu WiFi wird hergestellt...");
     }
-    Serial.println("Connected to WiFi");
+    Serial.println("Mit WiFi verbunden");
 
-    // initialize main I2C bus
+    // Initialisieren des Haupt-I2C-Busses
     //mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
     Wire.begin(mainSDA, mainSCL, mainClockSpeed);
 
-    // initialize lcd display to use mainWire
+    // Initialisieren des LCD-Displays für mainWire
     lcd.init();
     lcd.clear();
     lcd.backlight();
 
-    // initialize secondary I2C bus
+    // Initialisieren des sekundären I2C-Busses
     fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
 
-    // initialize SPI bus
+    // Initialisieren des SPI-Busses
     SPI.begin(vspi_clk_pin, vspi_miso_pin, vspi_mosi_pin, vspi_ss_pin);
 
-    // Initialize RTC and synchronize with NTP
+    // RTC initialisieren und mit NTP synchronisieren
     if (!rtc.begin(&Wire)) {
-        Serial.println("Could not find valid rtc, check wiring!");
+        Serial.println("RTC nicht gefunden, bitte Verkabelung überprüfen!");
     }
-    
+
     timeClient.begin();
     timeClient.update();
     rtc.adjust(DateTime(timeClient.getEpochTime()));
-    Serial.println("Initialized RTC, current time: ");
+    Serial.println("RTC initialisiert, aktuelle Zeit: ");
     Serial.println(currentTime());
-    
+
     if (!SPIFFS.begin(true)) {
-        Serial.println("Failed to mount file system");
+        Serial.println("Dateisystem konnte nicht gemountet werden");
         return;
     }
 
@@ -292,10 +294,10 @@ void setup() {
     xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
     delay(500);
 
-    Serial.println("Finished Setup");
+    Serial.println("Einrichtung abgeschlossen");
 }
 
 void loop() {
-
+    
 }
 
