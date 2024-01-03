@@ -6,6 +6,7 @@
 // Netzwerk
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <WiFiClientSecure.h>
 // Kommunikation
 #include <Wire.h>
 #include <SPI.h>
@@ -16,10 +17,27 @@
 // RTC
 #include <RTClib.h>
 #include <NTPClient.h>
+// Telegram-Bot
+#include <UniversalTelegramBot.h>
+#include <ArduinoJson.h>
 
 // Netzwerkdaten
 const char* ssid = "tkNOC_IoT";
 const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
+
+// Token des Telegram-bots
+const char* bot_token = "6923232009:AAGqJnmC9oe915CyHLO3OMCKHy9U8muVG1Q";
+
+// Hier die Chat IDs eintragen (kann man per @myidbot herausfinden)
+// Außerdem muss man "Start" auf dem Bot klicken bevor er Nachrichten versenden kann
+String chat_ids[] = {
+    "5639436151"
+};
+
+// Hier Chat-IDs für logging eintragen
+String logging_chat_ids[] = {
+    "5639436151"
+};
 
 // NTP Server Einstellungen
 const char* ntpServer = "pool.ntp.org";
@@ -63,32 +81,39 @@ const int movement_sensor_pin = 12;      // Bewegungsmelder
 // Log-Einstellungen
 // static const char *TAG = "Alarmanlage"; // Anwendungstag
 
-// Sensoreinstellungen für Pins
-const int dht_pin = 4;
-
 // Initialisierung der I2C-Schnittstellen
 TwoWire fastWire = TwoWire(1);
 
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, ntpServer, gmtOffset_sec, daylightOffset_sec);
-RTC_DS1307 rtc; // DS1307 RTC
-LiquidCrystal_I2C lcd(0x27, 20, 4); // I2C LCD
-MFRC522 mfrc522(vspi_ss_pin, rfid_rst_pin); // RFID-Lesegerät
-//DHT dht(dht_pin, DHT11); // DHT-Temperatursensor
+WiFiUDP ntpUDP; // UDP client, wird vom NTPClient verwendet
+NTPClient timeClient(ntpUDP, ntpServer, gmtOffset_sec, daylightOffset_sec); // NTP Client, um den RTC aktuell zu halten
+
+RTC_DS1307 rtc;                               // DS1307 RTC
+LiquidCrystal_I2C lcd(0x27, 20, 4);           // I2C LCD
+MFRC522 mfrc522(vspi_ss_pin, rfid_rst_pin);   // RFID-Lesegerät
+DHT dht(dht11_pin, DHT11);                    // DHT-Temperatursensor
+
+// Twitter Bot
+WiFiClientSecure client;
+UniversalTelegramBot bot(bot_token, client);
+
 
 // Variablen
-bool ARMED = false;
+bool ARMED = false;    // true = scharfgeschaltet
 bool LANGUAGE = false; // false = deutsch, true = englisch
 
-float temperature;
-float humidity;
+float temperature;     // aktuelle Temperatur
+float humidity;        // aktuelle Luftfeuchtigkeit
 
-int status = 0;
+int status = 0;        // was gerade in der Status-Anzeige gezeigt wird
 // 0 = Temperatur + Luftfeuchtigkeit, 1 = IP
+
+// Telegram-Bot prüft alle 1000ms ob neue Nachrichten vorhanden sind
+int bot_request_delay = 1000;
+unsigned long last_bot_refresh;
+
 
 // Task-Handles
 TaskHandle_t lcdTask;
-TaskHandle_t inputTask;
 
 // Funktionen
 void initial_setup(bool noFile);
@@ -109,11 +134,12 @@ String currentTime() {
     return String(buffer);
 }
 
-// --------- JOBS ---------
+// --------- JOBS UND INTERRUPTS---------
 
+// lcd-aktualisierung
 void lcdJob(void * pvParameters) {
-    if (LANGUAGE) Serial.println(("lcd refresher running on core %d", xPortGetCoreID()));
-    else Serial.println(("LCD-Aktualisierer läuft auf Core %d", xPortGetCoreID()));
+    if (LANGUAGE) Serial.println("lcd refresher running on core " + String(xPortGetCoreID()));
+    else Serial.println("LCD-Aktualisierer läuft auf Coree " + String(xPortGetCoreID()));
 
     lcd.clear();
 
@@ -127,10 +153,11 @@ void lcdJob(void * pvParameters) {
         lcd.setCursor(0, 1);
         switch (status) {
             case 0: 
-                lcd.print(("%d°C, %d%", temperature, humidity)); 
+                lcd.print(String(temperature) + "°C, ");
+                lcd.print(String(humidity) + "%");
                 break;
             case 1: 
-                lcd.print(("IP: %d", WiFi.localIP()));
+                lcd.print(("IP: " + String(WiFi.localIP())));
                 break;
         }
 
@@ -156,9 +183,9 @@ void IRAM_ATTR handleResetAlarmButtonInterrupt() {
 
 void IRAM_ATTR handleStatusButtonInterrupt() {
     status += 1;
-    Serial.println(("Status: %d", status));
+    Serial.println("Status: " + String(status));
     if (status > 1) status = 0;
-    for (;;) {if (digitalRead(status_button_pin) == LOW) break;}
+    while (digitalRead(status_button_pin) != LOW) {}
 }
 
 void IRAM_ATTR handleTagButtonInterrupt() {
@@ -167,7 +194,7 @@ void IRAM_ATTR handleTagButtonInterrupt() {
 
 void IRAM_ATTR handleLanguageButtonInterrupt() {
     LANGUAGE = !LANGUAGE;
-    for (;;) {if (digitalRead(status_button_pin) == LOW) break;}
+    //while (digitalRead(language_button_pin) != LOW) {}
 }
 
 // --------- RFID ---------
@@ -311,6 +338,53 @@ bool search_tag() {
     }
 }
 
+// --------- TELEGRAM-BOT --------
+
+void handleNewMessages(int numNewMessages) {
+    //Serial.println("Neue Nachrichten werden abgefragt...");
+    Serial.println(String(numNewMessages));
+
+    bool is_authorized = false;
+
+    for (int i=0; i<numNewMessages; i++) {
+        // Chat id of the requester
+        String chatID = String(bot.messages[i].chat_id);
+        for (int i = 0; i < sizeof(chat_ids); i++) {
+            if (chatID == chat_ids[i]) {
+                is_authorized = true;
+                break;
+            }
+        }
+
+        if (!is_authorized) bot.sendMessage(chatID, "Unauthorized user", "");
+        
+        // Print the received message
+        String text = bot.messages[i].text;
+        Serial.println(text);
+
+        String from_name = bot.messages[i].from_name;
+
+        if (text == "/start") {
+        String welcome = "Willkommen, " + from_name + ".\n";
+        welcome += "Benutze einen der folgenden Befehle:\n\n";
+        welcome += "/state gibt einen status-bericht aus \n";
+        bot.sendMessage(chatID, welcome, "");
+        }
+        
+        if (text == "/state") {
+            bot.sendMessage(chatID, "TEST", "");
+        }
+    }
+}
+
+void sendLogMessage(String message) {
+    for (int i = 0; i < sizeof(logging_chat_ids); i++) {
+        String chat_id = logging_chat_ids[i];
+        bot.sendMessage(chat_id, message, "");
+    }
+}
+
+
 // --------- EINRICHTUNG ---------
 
 void initial_setup(bool noFile) {
@@ -344,25 +418,10 @@ void setup() {
     Serial.begin(115200);
     //esp_log_level_set(TAG, ESP_LOG_INFO);
 
-    if (LANGUAGE) Serial.println(("Setup Running on Core %d", xPortGetCoreID()));
-    else Serial.println(("Setup läuft auf Core &d", xPortGetCoreID()));
+    if (LANGUAGE) Serial.println("Setup running on Core " + String(xPortGetCoreID()));
+    else Serial.println("Setup läuft auf Core " + String(xPortGetCoreID()));
 
-    // Buttons als input konfigurieren
-    pinMode(arm_button_pin, INPUT_PULLUP);
-    pinMode(reset_alarm_button_pin, INPUT_PULLUP);
-    pinMode(status_button_pin, INPUT_PULLUP);
-    pinMode(tag_button_pin, INPUT_PULLUP);
-    pinMode(language_button_pin, INPUT_PULLUP);
-
-    // Interrupts für Buttons hinzufügen
-    attachInterrupt(digitalPinToInterrupt(arm_button_pin), handleArmButtonInterrupt, FALLING);
-    attachInterrupt(digitalPinToInterrupt(reset_alarm_button_pin), handleResetAlarmButtonInterrupt, FALLING);
-    attachInterrupt(digitalPinToInterrupt(status_button_pin), handleStatusButtonInterrupt, FALLING);
-    attachInterrupt(digitalPinToInterrupt(tag_button_pin), handleTagButtonInterrupt, FALLING);
-    attachInterrupt(digitalPinToInterrupt(language_button_pin), handleLanguageButtonInterrupt, FALLING);
-
-
-    // Connect to WiFi
+    // Mit WLAN verbinden
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
@@ -372,15 +431,51 @@ void setup() {
     if (LANGUAGE) Serial.println("Connected to WiFi");
     else Serial.println("Mit WiFi verbunden");
 
+    // Root-Zertifikat für SSL hinzufügen (Telegram-Bot)
+    client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
+    //sendLogMessage("beginning...");
+    bot.sendMessage("539436151", "TEST", "");
+    delay(500);
+    
+    // Buttons als input konfigurieren
+    pinMode(arm_button_pin, INPUT_PULLUP);
+    pinMode(reset_alarm_button_pin, INPUT_PULLUP);
+    pinMode(status_button_pin, INPUT_PULLUP);
+    pinMode(tag_button_pin, INPUT_PULLUP);
+    pinMode(language_button_pin, INPUT_PULLUP);
+
+    delay(100);
+    // Interrupts für Buttons hinzufügen
+    attachInterrupt(digitalPinToInterrupt(arm_button_pin), &handleArmButtonInterrupt, FALLING);
+    Serial.println("arm_button_pin");
+    delay(3000);
+    attachInterrupt(digitalPinToInterrupt(reset_alarm_button_pin), &handleResetAlarmButtonInterrupt, FALLING);
+    Serial.println("reset_alarm_button_pin");
+    delay(3000);
+    attachInterrupt(digitalPinToInterrupt(status_button_pin), &handleStatusButtonInterrupt, FALLING);
+    Serial.println("status_button_pin");
+    delay(3000);
+    attachInterrupt(digitalPinToInterrupt(tag_button_pin), &handleTagButtonInterrupt, FALLING);
+    Serial.println("tag_button_pin");
+    delay(3000);
+    attachInterrupt(digitalPinToInterrupt(language_button_pin), &handleLanguageButtonInterrupt, FALLING);
+    Serial.println("language_button_pin");
+
+    Serial.println("test2"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(10000);
     // Initialisieren des Haupt-I2C-Busses
     //mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
     Wire.begin(mainSDA, mainSCL, mainClockSpeed);
 
+    Serial.println("test3"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
     // Initialisieren des LCD-Displays für mainWire
-    lcd.init();
-    lcd.clear();
-    lcd.backlight();
+    //lcd.init();
+    //lcd.clear();
+    //lcd.backlight();
 
+    Serial.println("test4"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
     // Initialisieren des sekundären I2C-Busses
     fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
 
@@ -393,11 +488,17 @@ void setup() {
         else Serial.println("RTC nicht gefunden, bitte Verkabelung überprüfen!");
     }
 
+    Serial.println("test5"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
+
     timeClient.begin();
     timeClient.update();
     rtc.adjust(DateTime(timeClient.getEpochTime()));
-    if (LANGUAGE) Serial.println(("Initialized RTC, current time: %d", currentTime()));
-    else Serial.println(("RTC initialisiert, aktuelle Zeit: %d", currentTime()));
+    if (LANGUAGE) Serial.println("Initialized RTC, current time: " + String(currentTime()));
+    else Serial.println("RTC initialisiert, aktuelle Zeit: " + String(currentTime()));
+
+    Serial.println("test6"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
 
     if (!SPIFFS.begin(true)) {
         if (LANGUAGE) Serial.println("Failed to mount file system");
@@ -405,18 +506,37 @@ void setup() {
         return;
     }
 
+    Serial.println("test7"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
+
     rfid_init();
+
+    Serial.println("test8"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
 
     xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
     delay(250);
     //xTaskCreatePinnedToCore(inputChecker, "inputChecker", 10000, NULL, 1, &inputTask, 0);
     //delay(250);
 
+    Serial.println("test9"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    delay(100);
+
     if (LANGUAGE) Serial.println("Finished Setup");
     else Serial.println("Einrichtung abgeschlossen");
 }
 
 void loop() {
-    delay(100);
+    if (millis() > last_bot_refresh + bot_request_delay)  {
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    while(numNewMessages) {
+      Serial.println("got response");
+      handleNewMessages(numNewMessages);
+      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    }
+    last_bot_refresh = millis();
+  }
+    delay(1000);
 }
 
