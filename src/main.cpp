@@ -44,16 +44,23 @@ const int vspi_ss_pin = 5;
 const int rfid_rst_pin = 4;
 
 // Pin-Einstellungen
-const int piezo_pin = 0;
-const int led_red_pin = 2;
-const int led_green_pin = 15;
-const int arm_button_pin = 32;
-const int reset_alarm_button_pin = 35;
-const int status_button_pin = 34;
-const int tag_button_pin = 39;
-const int language_button_pin = 36;
+const int piezo_pin = 0;                 // Piezo-Piepser
+const int led_red_pin = 2;               // Rote LED
+const int led_green_pin = 15;            // Grüne LED
 
-// Protokolleinstellungen
+const int arm_button_pin = 33;           // Taster 1
+const int reset_alarm_button_pin = 32;   // Taster 2
+const int status_button_pin = 35;        // Taster 3
+const int tag_button_pin = 34;           // Taster 4
+const int language_button_pin = 39;      // Taster 5
+
+const int photoelectric_sensor_pin = 25; // Lichtschranke
+const int radar_sensor_pin = 26;         // Radar
+const int microphone_pin = 27;           // Mikrofon
+const int dht11_pin = 14;                // DHT11
+const int movement_sensor_pin = 12;      // Bewegungsmelder
+
+// Log-Einstellungen
 // static const char *TAG = "Alarmanlage"; // Anwendungstag
 
 // Sensoreinstellungen für Pins
@@ -71,12 +78,27 @@ MFRC522 mfrc522(vspi_ss_pin, rfid_rst_pin); // RFID-Lesegerät
 
 // Variablen
 bool ARMED = false;
+bool LANGUAGE = false; // false = deutsch, true = englisch
+
+float temperature;
+float humidity;
+
+int status = 0;
+// 0 = Temperatur + Luftfeuchtigkeit, 1 = IP
 
 // Task-Handles
 TaskHandle_t lcdTask;
+TaskHandle_t inputTask;
 
 // Funktionen
 void initial_setup(bool noFile);
+
+// --------- LCD-Funktionen ---------
+
+void clearLine(int line) {
+    lcd.setCursor(0, line);
+    lcd.print("                    ");
+}
 
 // --------- RTC-FUNKTIONEN ---------
 
@@ -87,27 +109,65 @@ String currentTime() {
     return String(buffer);
 }
 
-// --------- LCD-AKTUALISIERUNG ---------
+// --------- JOBS ---------
 
 void lcdJob(void * pvParameters) {
-    Serial.println(("LCD-Aktualisierer läuft auf Core %d", xPortGetCoreID()));
+    if (LANGUAGE) Serial.println(("lcd refresher running on core %d", xPortGetCoreID()));
+    else Serial.println(("LCD-Aktualisierer läuft auf Core %d", xPortGetCoreID()));
+
+    lcd.clear();
+
     for (;;) {
         // Zeile 1: aktuelle Zeit
         lcd.setCursor(0, 0);
         lcd.print(currentTime());
 
-        // Zeile 2: IP
+        // Zeile 2: Status
+        clearLine(1);
         lcd.setCursor(0, 1);
-        lcd.print("IP: ");
-        lcd.print(WiFi.localIP());
+        switch (status) {
+            case 0: 
+                lcd.print(("%d°C, %d%", temperature, humidity)); 
+                break;
+            case 1: 
+                lcd.print(("IP: %d", WiFi.localIP()));
+                break;
+        }
 
         // Zeile 3: Alarmstatus
-        lcd.setCursor(0, 2);
+        //lcd.setCursor(0, 2);
+        //lcd.print("                    "); // zeile löschen
 
         // Zeile 4
-        lcd.setCursor(0, 3);
+        //lcd.setCursor(0, 3);
+        //lcd.print("                    "); // zeile löschen
+
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+}
+
+void IRAM_ATTR handleArmButtonInterrupt() {
+
+}
+
+void IRAM_ATTR handleResetAlarmButtonInterrupt() {
+    
+}
+
+void IRAM_ATTR handleStatusButtonInterrupt() {
+    status += 1;
+    Serial.println(("Status: %d", status));
+    if (status > 1) status = 0;
+    for (;;) {if (digitalRead(status_button_pin) == LOW) break;}
+}
+
+void IRAM_ATTR handleTagButtonInterrupt() {
+    
+}
+
+void IRAM_ATTR handleLanguageButtonInterrupt() {
+    LANGUAGE = !LANGUAGE;
+    for (;;) {if (digitalRead(status_button_pin) == LOW) break;}
 }
 
 // --------- RFID ---------
@@ -117,16 +177,18 @@ void rfid_init() {
 
     File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
 
-    // Überprüfung, ob die Whitelist-Datei geöffnet werden kann
+    // Überprüfen, ob die Whitelist-Datei geöffnet werden kann
     if (!whitelistFile) {
-        Serial.println("Whitelist-Datei nicht gefunden. Einrichtung erforderlich.");
+        if (LANGUAGE) Serial.println("Whitelist file not found. Setup required.");
+        else Serial.println("Whitelist-Datei nicht gefunden. Einrichtung erforderlich.");
         initial_setup(true);
         return;
     }
     
-    // Überprüfung, ob Tags in der Whitelist vorhanden sind
+    // Überprüfen, ob Tags in der Whitelist vorhanden sind
     if (whitelistFile.size() == 0) {
-        Serial.println("Keine Tags in der Whitelist. Einrichtung erforderlich.");
+        if (LANGUAGE) Serial.println("No tags in the whitelist. Setup required.");
+        else Serial.println("Keine Tags in der Whitelist. Einrichtung erforderlich.");
         initial_setup(false);
     }
     
@@ -134,8 +196,15 @@ void rfid_init() {
 }
 
 void save_tag() {
+    lcd.setCursor(0, 2);
+    if (LANGUAGE) lcd.print("Please hold an RFID");
+    else lcd.print(" Bitte den RFID-Tag ");
+    lcd.setCursor(0, 3);
+    if (LANGUAGE) lcd.print("tag to the reader!");
+    else lcd.print("an den Leser halten!");
+
     for (;;) {
-        // Überprüfen, ob eine Karte vorhanden ist
+        // Überprüfen, ob eine RFID-Karte vorhanden ist
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
             File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "a");
             
@@ -147,9 +216,26 @@ void save_tag() {
                 }
                 whitelistFile.println(tagData);
                 whitelistFile.close();
-                Serial.println("Tag erfolgreich gespeichert.");
+                if (LANGUAGE) Serial.println("Tag saved successfully.");
+                else Serial.println("Tag erfolgreich gespeichert.");
+
+                clearLine(2);
+                clearLine(3);
+                lcd.setCursor(0, 2);
+                if (LANGUAGE) lcd.print("RFID-Tag saved.");
+                else lcd.print("RFID-Tag gespeichert.");
+
+                delay(1000);
+                clearLine(2);
+                clearLine(3);
             } else {
-                Serial.println("Fehler beim Öffnen der Whitelist-Datei zum Schreiben.");
+                if (LANGUAGE) Serial.println("Failed to open whitelist file for writing.");
+                else Serial.println("Fehler beim Öffnen der Whitelist-Datei zum Schreiben.");
+                clearLine(2);
+                clearLine(3);
+                lcd.setCursor(0, 2);
+                if (LANGUAGE) lcd.print("Error while saving!");
+                else lcd.print("Fehler beim Speichern!");
             }
             return;
         }
@@ -158,7 +244,7 @@ void save_tag() {
 
 bool delete_tag() {
     for (;;) {
-        // Überprüfen, ob eine Karte vorhanden ist
+        // Überprüfen, ob eine RFID-Karte vorhanden ist
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
             String tagData = "";
             for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -183,9 +269,14 @@ bool delete_tag() {
                 
                 SPIFFS.remove("/rfid/rfid_tags.txt");
                 SPIFFS.rename("/rfid/temp.txt", "/rfid/rfid_tags.txt");
-                
+
+                if (LANGUAGE) Serial.println("Successfully deleted Tag.");
+                else Serial.println("Tag erfolgreich gelöscht");                
                 return true;
             }
+
+            if (LANGUAGE) Serial.println("Could not find Tag!");
+            else Serial.println("Tag konnte nicht gefunden werden!");
             return false;
         }
     }
@@ -226,37 +317,60 @@ void initial_setup(bool noFile) {
     if (noFile) {
         if (!SPIFFS.exists("/rfid")) {
             if (!SPIFFS.mkdir("/rfid")) {
-                Serial.println("Ordner rfid konnte nicht erstellt werden!");
+                if (LANGUAGE) Serial.println("Failed to create folder rfid!");
+                else Serial.println("Ordner rfid konnte nicht erstellt werden!");
                 for (;;);
             }
             File file = SPIFFS.open("/rfid/rfid_tags.txt", "w");
             if (!file) {
-                Serial.println("Datei rfid_flags.txt konnte nicht erstellt werden!");
+                if (LANGUAGE) Serial.println("Failed to create file rfid_flags.txt!");
+                else Serial.println("Datei rfid_flags.txt konnte nicht erstellt werden!");
                 for (;;);
             }
             file.close();
-            Serial.println("Created rfid_tags.txt");
+            if (LANGUAGE) Serial.println("Successfully created rfid_tags.txt");
+            else Serial.println("rfid_tags.txt wurde erfolgreich erstellt");
         }
     }
     
-    Serial.println("Bitte den RFID-Tag an den Leser halten!");
+    if (LANGUAGE) Serial.println("Please hold the rfid tag to the reader!");
+    else Serial.println("Bitte den RFID-Tag an den Leser halten!");
+
     save_tag();
 }
 
 void setup() {
-    // initialize serial monitor and logging
+    // Initialisieren des Seriellen Monitors
     Serial.begin(115200);
     //esp_log_level_set(TAG, ESP_LOG_INFO);
 
-    Serial.println(("Setup Running on Core %d", xPortGetCoreID()));
+    if (LANGUAGE) Serial.println(("Setup Running on Core %d", xPortGetCoreID()));
+    else Serial.println(("Setup läuft auf Core &d", xPortGetCoreID()));
+
+    // Buttons als input konfigurieren
+    pinMode(arm_button_pin, INPUT_PULLUP);
+    pinMode(reset_alarm_button_pin, INPUT_PULLUP);
+    pinMode(status_button_pin, INPUT_PULLUP);
+    pinMode(tag_button_pin, INPUT_PULLUP);
+    pinMode(language_button_pin, INPUT_PULLUP);
+
+    // Interrupts für Buttons hinzufügen
+    attachInterrupt(digitalPinToInterrupt(arm_button_pin), handleArmButtonInterrupt, FALLING);
+    attachInterrupt(digitalPinToInterrupt(reset_alarm_button_pin), handleResetAlarmButtonInterrupt, FALLING);
+    attachInterrupt(digitalPinToInterrupt(status_button_pin), handleStatusButtonInterrupt, FALLING);
+    attachInterrupt(digitalPinToInterrupt(tag_button_pin), handleTagButtonInterrupt, FALLING);
+    attachInterrupt(digitalPinToInterrupt(language_button_pin), handleLanguageButtonInterrupt, FALLING);
+
 
     // Connect to WiFi
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-        Serial.println("Verbindung zu WiFi wird hergestellt...");
+        if (LANGUAGE) Serial.println("Connecting to WiFi...");
+        else Serial.println("Verbindung zu WiFi wird hergestellt...");
     }
-    Serial.println("Mit WiFi verbunden");
+    if (LANGUAGE) Serial.println("Connected to WiFi");
+    else Serial.println("Mit WiFi verbunden");
 
     // Initialisieren des Haupt-I2C-Busses
     //mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
@@ -275,29 +389,34 @@ void setup() {
 
     // RTC initialisieren und mit NTP synchronisieren
     if (!rtc.begin(&Wire)) {
-        Serial.println("RTC nicht gefunden, bitte Verkabelung überprüfen!");
+        if (LANGUAGE) Serial.println("Could not find valid rtc, check wiring!");
+        else Serial.println("RTC nicht gefunden, bitte Verkabelung überprüfen!");
     }
 
     timeClient.begin();
     timeClient.update();
     rtc.adjust(DateTime(timeClient.getEpochTime()));
-    Serial.println("RTC initialisiert, aktuelle Zeit: ");
-    Serial.println(currentTime());
+    if (LANGUAGE) Serial.println(("Initialized RTC, current time: %d", currentTime()));
+    else Serial.println(("RTC initialisiert, aktuelle Zeit: %d", currentTime()));
 
     if (!SPIFFS.begin(true)) {
-        Serial.println("Dateisystem konnte nicht gemountet werden");
+        if (LANGUAGE) Serial.println("Failed to mount file system");
+        else Serial.println("Dateisystem konnte nicht gemountet werden");
         return;
     }
 
     rfid_init();
 
     xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
-    delay(500);
+    delay(250);
+    //xTaskCreatePinnedToCore(inputChecker, "inputChecker", 10000, NULL, 1, &inputTask, 0);
+    //delay(250);
 
-    Serial.println("Einrichtung abgeschlossen");
+    if (LANGUAGE) Serial.println("Finished Setup");
+    else Serial.println("Einrichtung abgeschlossen");
 }
 
 void loop() {
-    
+    delay(100);
 }
 

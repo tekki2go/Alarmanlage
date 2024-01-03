@@ -79,11 +79,11 @@ Piezo beeper: 0
 LED ROT: 2
 LED GRÜN: 15
 
-Button 1: 32
-Button 2: 35
-Button 3: 34
-Button 4: 39
-Button 5: 36
+Button 1: 33
+Button 2: 32
+Button 3: 35
+Button 4: 34
+Button 5: 39
 
 funktionen:
 - tag anlegen / löschen
@@ -92,11 +92,11 @@ funktionen:
 - Status: WLAN, 
 - SPRACHE: deutsch / englisch
 
-Lichtschranke: 33
-Radar: 25
-Mikrofon: 26
-DHT11: 27
-Bewegungsmelder: 14
+Lichtschranke: 25
+Radar: 26
+Mikrofon: 27
+DHT11: 14
+Bewegungsmelder: 12
 
 
 Todo:
