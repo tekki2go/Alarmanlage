@@ -1,3 +1,5 @@
+#pragma region includes
+
 #include <Arduino.h>
 // FS-Bibliotheken
 #include <SPIFFS.h>
@@ -21,6 +23,8 @@
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
 
+#pragma endregion
+
 // Netzwerkdaten
 const char* ssid = "tkNOC_IoT";
 const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
@@ -38,6 +42,8 @@ String chat_ids[] = {
 String logging_chat_ids[] = {
     "5639436151"
 };
+
+#pragma region settings
 
 // NTP Server Einstellungen
 const char* ntpServer = "pool.ntp.org";
@@ -81,6 +87,9 @@ const int movement_sensor_pin = 12;      // Bewegungsmelder
 // Log-Einstellungen
 // static const char *TAG = "Alarmanlage"; // Anwendungstag
 
+#pragma endregion
+
+#pragma region inits
 // Initialisierung der I2C-Schnittstellen
 TwoWire fastWire = TwoWire(1);
 
@@ -96,7 +105,13 @@ DHT dht(dht11_pin, DHT11);                    // DHT-Temperatursensor
 WiFiClientSecure client;
 UniversalTelegramBot bot(bot_token, client);
 
+// Task-Handles
+TaskHandle_t lcdTask;
 
+
+#pragma endregion
+
+#pragma region variables
 // Variablen
 bool ARMED = false;    // true = scharfgeschaltet
 bool LANGUAGE = false; // false = deutsch, true = englisch
@@ -111,9 +126,7 @@ int status = 0;        // was gerade in der Status-Anzeige gezeigt wird
 int bot_request_delay = 1000;
 unsigned long last_bot_refresh;
 
-
-// Task-Handles
-TaskHandle_t lcdTask;
+#pragma endregion
 
 // Funktionen
 void initial_setup(bool noFile);
@@ -135,6 +148,8 @@ String currentTime() {
 }
 
 // --------- JOBS UND INTERRUPTS---------
+
+#pragma region jobs
 
 // lcd-aktualisierung
 void lcdJob(void * pvParameters) {
@@ -173,6 +188,10 @@ void lcdJob(void * pvParameters) {
     }
 }
 
+#pragma endregion
+
+#pragma region Interrupts
+
 void IRAM_ATTR handleArmButtonInterrupt() {
 
 }
@@ -195,7 +214,10 @@ void IRAM_ATTR handleLanguageButtonInterrupt() {
     LANGUAGE = !LANGUAGE;
 }
 
+#pragma endregion
+
 // --------- RFID ---------
+#pragma region rfid
 
 void rfid_init() {
     mfrc522.PCD_Init();
@@ -336,7 +358,10 @@ bool search_tag() {
     }
 }
 
+#pragma endregion rfid
+
 // --------- TELEGRAM-BOT --------
+#pragma region telegram
 
 void handleNewMessages(int numNewMessages) {
     //Serial.println("Neue Nachrichten werden abgefragt...");
@@ -382,8 +407,10 @@ void sendLogMessage(String message) {
     }
 }
 
+#pragma endregion
 
 // --------- EINRICHTUNG ---------
+#pragma region setup
 
 void initial_setup(bool noFile) {
     if (noFile) {
@@ -496,6 +523,11 @@ void setup() {
     else Serial.println("Einrichtung abgeschlossen");
 }
 
+#pragma endregion
+
+// --------- HAUPT-PROGRAMM ---------
+#pragma region loop
+
 void loop() {
     if (millis() > last_bot_refresh + bot_request_delay)  {
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
@@ -510,3 +542,4 @@ void loop() {
     delay(1000);
 }
 
+#pragma endregion
