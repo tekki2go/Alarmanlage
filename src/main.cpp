@@ -185,7 +185,6 @@ void IRAM_ATTR handleStatusButtonInterrupt() {
     status += 1;
     Serial.println("Status: " + String(status));
     if (status > 1) status = 0;
-    while (digitalRead(status_button_pin) != LOW) {}
 }
 
 void IRAM_ATTR handleTagButtonInterrupt() {
@@ -194,7 +193,6 @@ void IRAM_ATTR handleTagButtonInterrupt() {
 
 void IRAM_ATTR handleLanguageButtonInterrupt() {
     LANGUAGE = !LANGUAGE;
-    //while (digitalRead(language_button_pin) != LOW) {}
 }
 
 // --------- RFID ---------
@@ -444,38 +442,22 @@ void setup() {
     pinMode(tag_button_pin, INPUT_PULLUP);
     pinMode(language_button_pin, INPUT_PULLUP);
 
-    delay(100);
     // Interrupts für Buttons hinzufügen
     attachInterrupt(digitalPinToInterrupt(arm_button_pin), &handleArmButtonInterrupt, FALLING);
-    Serial.println("arm_button_pin");
-    delay(3000);
     attachInterrupt(digitalPinToInterrupt(reset_alarm_button_pin), &handleResetAlarmButtonInterrupt, FALLING);
-    Serial.println("reset_alarm_button_pin");
-    delay(3000);
     attachInterrupt(digitalPinToInterrupt(status_button_pin), &handleStatusButtonInterrupt, FALLING);
-    Serial.println("status_button_pin");
-    delay(3000);
     attachInterrupt(digitalPinToInterrupt(tag_button_pin), &handleTagButtonInterrupt, FALLING);
-    Serial.println("tag_button_pin");
-    delay(3000);
     attachInterrupt(digitalPinToInterrupt(language_button_pin), &handleLanguageButtonInterrupt, FALLING);
-    Serial.println("language_button_pin");
 
-    Serial.println("test2"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(10000);
     // Initialisieren des Haupt-I2C-Busses
     //mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
     Wire.begin(mainSDA, mainSCL, mainClockSpeed);
 
-    Serial.println("test3"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
     // Initialisieren des LCD-Displays für mainWire
-    //lcd.init();
-    //lcd.clear();
-    //lcd.backlight();
+    lcd.init();
+    lcd.clear();
+    lcd.backlight();
 
-    Serial.println("test4"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
     // Initialisieren des sekundären I2C-Busses
     fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
 
@@ -488,17 +470,12 @@ void setup() {
         else Serial.println("RTC nicht gefunden, bitte Verkabelung überprüfen!");
     }
 
-    Serial.println("test5"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
-
     timeClient.begin();
     timeClient.update();
     rtc.adjust(DateTime(timeClient.getEpochTime()));
     if (LANGUAGE) Serial.println("Initialized RTC, current time: " + String(currentTime()));
     else Serial.println("RTC initialisiert, aktuelle Zeit: " + String(currentTime()));
 
-    Serial.println("test6"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
 
     if (!SPIFFS.begin(true)) {
         if (LANGUAGE) Serial.println("Failed to mount file system");
@@ -506,21 +483,14 @@ void setup() {
         return;
     }
 
-    Serial.println("test7"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
 
     rfid_init();
 
-    Serial.println("test8"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
 
     xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
     delay(250);
     //xTaskCreatePinnedToCore(inputChecker, "inputChecker", 10000, NULL, 1, &inputTask, 0);
     //delay(250);
-
-    Serial.println("test9"); // REMOVE ME, ONLY FOR DEBUGGING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    delay(100);
 
     if (LANGUAGE) Serial.println("Finished Setup");
     else Serial.println("Einrichtung abgeschlossen");
