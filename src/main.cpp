@@ -66,11 +66,6 @@ const int mainSDA = 21;
 const int mainSCL = 22;
 const int mainClockSpeed = 100000; // 100kHz Taktgeschwindigkeit
 
-// I2C-Schnittstelle für Hochgeschwindigkeits-, Niedriglatenzkommunikation (später als fastWire bezeichnet)
-const int secondarySDA = 16;
-const int secondarySCL = 17;
-const int secondaryClockSpeed = 400000; // 400kHz Taktgeschwindigkeit
-
 // RFID-Lesegerät Einstellungen
 const int vspi_mosi_pin = 23;
 const int vspi_miso_pin = 19;
@@ -541,9 +536,6 @@ void setup() {
         else Serial.println("Es konnte kein BMP280 gefunden werden!");
     }
 
-    // Initialisieren des sekundären I2C-Busses
-    fastWire.begin(secondarySDA, secondarySCL, secondaryClockSpeed);
-
     // Initialisieren des SPI-Busses
     SPI.begin(vspi_clk_pin, vspi_miso_pin, vspi_mosi_pin, vspi_ss_pin);
 
@@ -572,7 +564,7 @@ void setup() {
     rfid_init();
 
 
-    //xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
+    xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
     delay(250);
     //xTaskCreatePinnedToCore(inputChecker, "inputChecker", 10000, NULL, 1, &inputTask, 0);
     //delay(250);
