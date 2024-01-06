@@ -53,8 +53,7 @@ const int pressure_tolerance = 10; //Luftdruck-Toleranz in hPa
 
 // Timings
 int bot_request_delay = 1000;          // Telegram-Bot prüft alle 1000 ms ob neue Nachrichten vorhanden sind
-int bmp280_refresh_delay = 100;        // Luftdruck wird alle 100ms abgefragt
-int dht11_refresh_delay = 2000;        // Temperatur und Luftfeuchtigkeit werden alle 2 sekunden abgefragt
+int debounce_time = 500;               // Button-Interrupts dürfen nur alle 500ms getriggert werden
 
 // NTP Server Einstellungen
 const char* ntpServer = "pool.ntp.org";
@@ -118,6 +117,7 @@ TaskHandle_t lcdTask;
 TaskHandle_t sensorTask;
 
 TaskHandle_t armTask;
+TaskHandle_t resetTask;
 
 #pragma endregion
 
@@ -134,6 +134,13 @@ float height;          // aktuelle Höhe (m)
 
 int status = 0;        // was gerade in der Status-Anzeige gezeigt wird
 // 0 = Temperatur + Luftfeuchtigkeit, 1 = IP
+
+// debounce timings
+volatile unsigned long last_arm_interrupt_time = 0;
+volatile unsigned long last_reset_interrupt_time = 0;
+volatile unsigned long last_status_interrupt_time = 0;
+volatile unsigned long last_tag_interrupt_time = 0;
+volatile unsigned long last_language_interrupt_time = 0;
 
 // variable für letzten refresh der nachrichten
 unsigned long last_bot_refresh;
@@ -198,7 +205,7 @@ void save_tag() {
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
             File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "a");
             
-            // Überprüfen, ob die Whitelist existiert und versuchen, das Tag darin zu speichern
+            // Überprüfen, ob die Whitelist existiert und versuchen, den Tag darin zu speichern
             if (whitelistFile) {
                 String tagData = "";
                 for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -283,7 +290,7 @@ bool search_tag() {
             
             File whitelistFile = SPIFFS.open("/rfid/tags.txt", "r");
             
-            // Überprüfen, ob das Tag in der Datei vorhanden ist und wahr zurückgeben, wenn es gefunden wird
+            // Überprüfen, ob der Tag in der Datei vorhanden ist und wahr zurückgeben, wenn er gefunden wird
             if (whitelistFile) {
                 String line;
                 while (whitelistFile.available()) {
@@ -299,6 +306,27 @@ bool search_tag() {
             }
         }
     }
+}
+
+int tag_amount() {
+    File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
+
+    // Prüfen ob die whitelist-datei geöffnet werden kann
+    if (!whitelistFile) {
+        if (LANGUAGE) Serial.println("Failed to open whitelist file.");
+        else Serial.println("Fehler beim Öffnen der Whitelist-Datei.");
+        return -1; // wegen fehler -1 zurückgeben
+    }
+
+    int count = 0;
+    while (whitelistFile.available()) {
+        if (whitelistFile.readStringUntil('\n').length() > 0) {
+            count++;
+        }
+    }
+
+    whitelistFile.close();
+    return count;
 }
 
 #pragma endregion rfid
@@ -326,7 +354,6 @@ void handleNewMessages(int numNewMessages) {
         
         // Print the received message
         String text = bot.messages[i].text;
-        Serial.println(text);
 
         String from_name = bot.messages[i].from_name;
 
@@ -341,14 +368,21 @@ void handleNewMessages(int numNewMessages) {
         welcome += "/deactivate stoppt einen aktivierten Alarm und deaktiviert die Alarmanlage";
         bot.sendMessage(chatID, welcome, "");
         }
-        
+
+        // WIP!
         if (text == "/status") {
             String message = "Status-Bericht: \n";
+            message += "Aktiviert: " + String(temperature, 1) + " °C\n";
+            message += "Letzte Aktivierung: " + String(pressure, 2) + " hPa\n";
+            bot.sendMessage(chatID, message, "");
+        }
+        
+        if (text == "/sensors") {
+            String message = "Sensor-Werte: \n";
             message += "Temperatur: " + String(temperature, 1) + " °C\n";
             message += "Luftfeuchtigkeit: " + String(humidity, 0) + " %\n";
             message += "Luftdruck: " + String(pressure, 2) + " hPa\n";
             message += "Höhe: " + String(height, 2) + " m\n";
-            //message += "\n";
             bot.sendMessage(chatID, message, "");
         }
     }
@@ -491,32 +525,68 @@ void armTaskHandle(void * pvParameters) {
 
 }
 
+void resetTaskHandle(void * pvParameters) {
+
+
+    armTask = NULL;
+    vTaskDelete(NULL);
+}
+
 #pragma endregion
 
 #pragma region Interrupts
 
 void IRAM_ATTR handleArmButtonInterrupt() {
-    if (armTask == NULL) {
-        xTaskCreatePinnedToCore(armTaskHandle, "armTask", 10000, NULL, 0, &armTask, 0);
+    unsigned long interruptTime = millis();
+
+    if (interruptTime - last_arm_interrupt_time > debounce_time) {
+        if (armTask == NULL) {
+            xTaskCreatePinnedToCore(armTaskHandle, "armTask", 5000, NULL, 0, &armTask, 0);
+        }
+        last_arm_interrupt_time = interruptTime;
     }
 }
 
 void IRAM_ATTR handleResetAlarmButtonInterrupt() {
-    
+    unsigned long interruptTime = millis();
+
+    if (interruptTime - last_reset_interrupt_time > debounce_time) {
+        if (resetTask == NULL) {
+            xTaskCreatePinnedToCore(resetTaskHandle, "resetTask", 5000, NULL, 0, &resetTask, 0);
+        }
+        last_reset_interrupt_time = interruptTime;
+    }
 }
 
 void IRAM_ATTR handleStatusButtonInterrupt() {
-    status += 1;
-    if (status > 2) status = 0;
+    unsigned long interruptTime = millis();
+
+    if (interruptTime - last_status_interrupt_time > debounce_time) {
+        status += 1;
+        if (status > 2) status = 0;
+
+        last_status_interrupt_time = interruptTime;
+    }
 }
 
 void IRAM_ATTR handleTagButtonInterrupt() {
+    unsigned long interruptTime = millis();
+
+    if (interruptTime - last_tag_interrupt_time > debounce_time) {
+
+        last_tag_interrupt_time = interruptTime;
+    }
     
 }
 
 void IRAM_ATTR handleLanguageButtonInterrupt() {
-    LANGUAGE = !LANGUAGE;
-    Serial.println("language");
+    unsigned long interruptTime = millis();
+
+    if (interruptTime - last_language_interrupt_time > debounce_time) {
+        LANGUAGE = !LANGUAGE;
+
+        last_language_interrupt_time = interruptTime;
+    }
 }
 
 void IRAM_ATTR handlePhotoelectricInterrupt() {
@@ -661,8 +731,6 @@ void loop() {
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
 
     while(numNewMessages) {
-      if (LANGUAGE) Serial.println("got response");
-      else Serial.println("Nachricht erhalten");
       handleNewMessages(numNewMessages);
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
