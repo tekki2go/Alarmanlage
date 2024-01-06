@@ -307,8 +307,8 @@ bool search_tag() {
 #pragma region telegram
 
 void handleNewMessages(int numNewMessages) {
-    //Serial.println("Neue Nachrichten werden abgefragt...");
-    Serial.println(String(numNewMessages));
+    if (LANGUAGE) Serial.print("Received " + String(numNewMessages) + " new messages.");
+    else Serial.print(String(numNewMessages) + " Neue Nachrichten erhalten.");
 
     bool is_authorized = false;
 
@@ -333,12 +333,23 @@ void handleNewMessages(int numNewMessages) {
         if (text == "/start") {
         String welcome = "Willkommen, " + from_name + ".\n";
         welcome += "Benutze einen der folgenden Befehle:\n\n";
-        welcome += "/state gibt einen status-bericht aus \n";
+        welcome += "/status gibt einen Status-Bericht aus\n";
+        welcome += "/sensors gibt die aktuellen Sensor-werte aus\n\n";
+        welcome += "Funktionen, die einen RFID-Tag benötigen:\n";
+        welcome += "/arm aktiviert die Alarmanlage\n";
+        welcome += "/disarm deaktiviert die Alarmanlage\n";
+        welcome += "/deactivate stoppt einen aktivierten Alarm und deaktiviert die Alarmanlage";
         bot.sendMessage(chatID, welcome, "");
         }
         
-        if (text == "/state") {
-            bot.sendMessage(chatID, "TEST", "");
+        if (text == "/status") {
+            String message = "Status-Bericht: \n";
+            message += "Temperatur: " + String(temperature, 1) + " °C\n";
+            message += "Luftfeuchtigkeit: " + String(humidity, 0) + " %\n";
+            message += "Luftdruck: " + String(pressure, 2) + " hPa\n";
+            message += "Höhe: " + String(height, 2) + " m\n";
+            //message += "\n";
+            bot.sendMessage(chatID, message, "");
         }
     }
 }
@@ -415,13 +426,28 @@ void sensorJob(void * pvParameters) {
     else Serial.println("Sensor-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
 
     for (;;) {
-        pressure = bmp.readPressure()/100;
-        height = bmp.readAltitude(1013.25);
-        temperature = dht.readTemperature();
-        humidity = dht.readHumidity();
-        if (isnan(temperature) || isnan(humidity)) {
+        float new_pressure = bmp.readPressure()/100;
+        float new_temperature = dht.readTemperature();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        float new_height = bmp.readAltitude(1013.25);
+        float new_humidity = dht.readHumidity();
+
+        if (isnan(new_temperature) || isnan(new_humidity)) {
             if (LANGUAGE) Serial.println("Failed to read from DHT sensor!");
             else Serial.println("Konnte nicht vom DHT-Sensor lesen");
+        }
+        else {
+            temperature = new_temperature;
+            humidity = new_humidity;
+        }
+
+        if (isnan(new_pressure) || isnan(new_height)) {
+            if (LANGUAGE) Serial.println("Failed to read from BMP280 sensor!");
+            else Serial.println("Konnte nicht vom BMP280-Sensor lesen");
+        }
+        else {
+            pressure = new_pressure;
+            height = new_height;
         }
 
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -481,7 +507,6 @@ void IRAM_ATTR handleResetAlarmButtonInterrupt() {
 
 void IRAM_ATTR handleStatusButtonInterrupt() {
     status += 1;
-    Serial.println("Status: " + String(status));
     if (status > 2) status = 0;
 }
 
@@ -619,7 +644,7 @@ void setup() {
 
     xTaskCreatePinnedToCore(lcdJob, "lcdJob", 5000, NULL, 1, &lcdTask, 0);
     delay(250);
-    xTaskCreatePinnedToCore(sensorJob, "sensorJob", 1000, NULL, 1, &sensorTask, 0);
+    xTaskCreatePinnedToCore(sensorJob, "sensorJob", 5000, NULL, 1, &sensorTask, 0);
     delay(250);
 
     if (LANGUAGE) Serial.println("Finished Setup");
