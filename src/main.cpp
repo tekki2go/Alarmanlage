@@ -169,6 +169,7 @@ void lcdJob(void * pvParameters) {
     lcd.clear();
 
     for (;;) {
+        IPAddress ip = WiFi.localIP();
         // Zeile 1: aktuelle Zeit
         lcd.setCursor(0, 0);
         lcd.print(currentTime());
@@ -177,12 +178,15 @@ void lcdJob(void * pvParameters) {
         clearLine(1);
         lcd.setCursor(0, 1);
         switch (status) {
-            case 0: 
+            case 0:
                 lcd.print(String(temperature) + "C, ");
                 lcd.print(String(humidity) + "%");
                 break;
-            case 1: 
-                lcd.print(("IP: " + String(WiFi.localIP())));
+            case 1:
+                lcd.print("IP: " + ip.toString());
+                break;
+            case 2:
+                lcd.print("Pressure: " + String(pressure) + " , " + String(height) + "m");
                 break;
         }
         if (ALARM) {
@@ -235,7 +239,7 @@ void IRAM_ATTR handleResetAlarmButtonInterrupt() {
 void IRAM_ATTR handleStatusButtonInterrupt() {
     status += 1;
     Serial.println("Status: " + String(status));
-    if (status > 1) status = 0;
+    if (status > 2) status = 0;
 }
 
 void IRAM_ATTR handleTagButtonInterrupt() {
@@ -559,6 +563,7 @@ void setup() {
     }
 
     // Sensoren
+    dht.begin();
 
 
     rfid_init();
@@ -582,18 +587,24 @@ void loop() {
     if (millis() > last_bot_refresh + bot_request_delay)  {
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
 
-    pressure = bmp.readPressure()/100;
-    height = bmp.readAltitude(1013.25);
-    temperature = dht.readTemperature();
-    humidity = dht.readHumidity();
-
     while(numNewMessages) {
-      Serial.println("got response");
+      if (LANGUAGE) Serial.println("got response");
+      else Serial.println("Nachricht erhalten");
       handleNewMessages(numNewMessages);
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
     last_bot_refresh = millis();
     }
+
+    pressure = bmp.readPressure()/100;
+    height = bmp.readAltitude(1013.25);
+    temperature = dht.readTemperature();
+    humidity = dht.readHumidity();
+    if (isnan(temperature) || isnan(humidity)) {
+        if (LANGUAGE) Serial.println("Failed to read from DHT sensor!");
+        else Serial.println("Konnte nicht vom DHT-Sensor lesen");
+    }
+
     delay(500);
 }
 
