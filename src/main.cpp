@@ -52,6 +52,7 @@ String logging_chat_ids[] = {
 const int pressure_tolerance = 10; //Luftdruck-Toleranz in hPa
 
 // Timings
+int alarm_activation_time = 30;        // Zeit in Sekunden, bis die Alarmanlage aktiviert wird
 int bot_request_delay = 1000;          // Telegram-Bot prüft alle 1000 ms ob neue Nachrichten vorhanden sind
 int debounce_time = 500;               // Button-Interrupts dürfen nur alle 500ms getriggert werden
 
@@ -145,19 +146,23 @@ volatile unsigned long last_language_interrupt_time = 0;
 // variable für letzten refresh der nachrichten
 unsigned long last_bot_refresh;
 
+// variable zur verhinderung von mehreren I2C-Zugriffen gleichzeitig
+volatile bool i2c_lock = false;
+
+// Variable für Dateien
+File whitelistFile;
+
 #pragma endregion
 
 // Funktionen
 void initial_setup(bool noFile);
 
-// --------- LCD-Funktionen ---------
+// --------- Nützliche Funktionen ---------
 
 void clearLine(int line) {
     lcd.setCursor(0, line);
     lcd.print("                    ");
 }
-
-// --------- RTC-FUNKTIONEN ---------
 
 String currentTime() {
     DateTime now = rtc.now();
@@ -166,13 +171,28 @@ String currentTime() {
     return String(buffer);
 }
 
+void clearAlarms() {
+
+}
+
+void lockI2CBus() {
+    while (i2c_lock) {
+        delay(30);
+    }
+    i2c_lock = true;
+}
+
+void unlockI2CBus() {
+    i2c_lock = false;
+}
+
 // --------- RFID ---------
 #pragma region rfid
 
 void rfid_init() {
     mfrc522.PCD_Init();
 
-    File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
+    whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
 
     // Überprüfen, ob die Whitelist-Datei geöffnet werden kann
     if (!whitelistFile) {
@@ -203,7 +223,7 @@ void save_tag() {
     for (;;) {
         // Überprüfen, ob eine RFID-Karte vorhanden ist
         if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-            File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "a");
+            whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "a");
             
             // Überprüfen, ob die Whitelist existiert und versuchen, den Tag darin zu speichern
             if (whitelistFile) {
@@ -211,6 +231,9 @@ void save_tag() {
                 for (byte i = 0; i < mfrc522.uid.size; i++) {
                     tagData += String(mfrc522.uid.uidByte[i], HEX);
                 }
+
+                Serial.println("Tag gefunden: " + tagData);
+
                 whitelistFile.println(tagData);
                 whitelistFile.close();
                 if (LANGUAGE) Serial.println("Tag saved successfully.");
@@ -220,7 +243,7 @@ void save_tag() {
                 clearLine(3);
                 lcd.setCursor(0, 2);
                 if (LANGUAGE) lcd.print("RFID-Tag saved.");
-                else lcd.print("RFID-Tag gespeichert.");
+                else lcd.print("RFID-Tag gespeichert");
 
                 delay(1000);
                 clearLine(2);
@@ -247,8 +270,10 @@ bool delete_tag() {
             for (byte i = 0; i < mfrc522.uid.size; i++) {
                 tagData += String(mfrc522.uid.uidByte[i], HEX);
             }
+
+            Serial.println("Tag gefunden: " + tagData);
             
-            File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
+            whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
             File tempFile = SPIFFS.open("/rfid/temp.txt", "w");
             
             // Überprüfen, ob die Whitelist und Temporärdatei existieren und die Whitelist neu schreiben, indem eine Temporärdatei erstellt wird
@@ -287,8 +312,10 @@ bool search_tag() {
             for (byte i = 0; i < mfrc522.uid.size; i++) {
                 tagData += String(mfrc522.uid.uidByte[i], HEX);
             }
+
+            Serial.println("Tag gefunden: " + tagData);
             
-            File whitelistFile = SPIFFS.open("/rfid/tags.txt", "r");
+            whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
             
             // Überprüfen, ob der Tag in der Datei vorhanden ist und wahr zurückgeben, wenn er gefunden wird
             if (whitelistFile) {
@@ -296,7 +323,9 @@ bool search_tag() {
                 while (whitelistFile.available()) {
                     line = whitelistFile.readStringUntil('\n');
                     line.trim();
-                    if (line == tagData) {
+                    Serial.println(line);                                 //REMOVE LATER!!!!!!!!!!!!!!!!!!!!!
+                    // == mit contain ersetzt für zuverlässigere erkennung
+                    if (line == tagData) { //.indexOf(tagData) > 0) {
                         whitelistFile.close();
                         return true;
                     }
@@ -309,7 +338,7 @@ bool search_tag() {
 }
 
 int tag_amount() {
-    File whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
+    whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
 
     // Prüfen ob die whitelist-datei geöffnet werden kann
     if (!whitelistFile) {
@@ -409,10 +438,13 @@ void lcdJob(void * pvParameters) {
     if (LANGUAGE) Serial.println("lcd refresher running on core " + String(xPortGetCoreID()));
     else Serial.println("LCD-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
 
+    lockI2CBus();
     lcd.clear();
+    unlockI2CBus();
 
     for (;;) {
         IPAddress ip = WiFi.localIP();
+        lockI2CBus();
         // Zeile 1: aktuelle Zeit
         lcd.setCursor(0, 0);
         lcd.print(currentTime());
@@ -438,9 +470,14 @@ void lcdJob(void * pvParameters) {
                 lcd.print("m");
                 break;
         }
+
         if (ALARM & ARMED) {
             if (LANGUAGE) Serial.println("Alarm triggered!");
             else Serial.println("Alarm ausgelöst!");
+
+            clearLine(2);
+            lcd.setCursor(0, 2);
+            lcd.print("  ALARM AUSGELOEST  ");
         }
 
         // Zeile 3: Alarmstatus
@@ -451,6 +488,7 @@ void lcdJob(void * pvParameters) {
         //lcd.setCursor(0, 3);
         //lcd.print("                    "); // zeile löschen
 
+        unlockI2CBus();
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
@@ -460,11 +498,13 @@ void sensorJob(void * pvParameters) {
     else Serial.println("Sensor-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
 
     for (;;) {
+        lockI2CBus();
         float new_pressure = bmp.readPressure()/100;
         float new_temperature = dht.readTemperature();
         vTaskDelay(pdMS_TO_TICKS(500));
         float new_height = bmp.readAltitude(1013.25);
         float new_humidity = dht.readHumidity();
+        unlockI2CBus();
 
         if (isnan(new_temperature) || isnan(new_humidity)) {
             if (LANGUAGE) Serial.println("Failed to read from DHT sensor!");
@@ -499,26 +539,55 @@ void armTaskHandle(void * pvParameters) {
     Serial.println(action_message + process_message);
     Serial.println(rfid_message);
 
+    lockI2CBus();
+    clearLine(2);
+    lcd.setCursor(0, 2);
+    lcd.print(LANGUAGE ? "Please hold RFID-tag" : "Bitte RFID-Tag an");
     clearLine(3);
     lcd.setCursor(0, 3);
-    lcd.print(LANGUAGE ? "Please hold RFID-tag" : "Bitte RFID-Tag an");
-    clearLine(4);
-    lcd.setCursor(0, 4);
     lcd.print(LANGUAGE ? "on the reader." : "den Leser halten");
 
     bool tag_verified = search_tag();
 
+    clearLine(2);
     clearLine(3);
-    clearLine(4);
-    lcd.setCursor(0,3);
+    lcd.setCursor(0,2);
 
     if (tag_verified) {
         String message = LANGUAGE ? "Tag verified." : "Tag verifiziert.";
         lcd.print(message);
+        Serial.println(message);
+
+        vTaskDelay(500);
+        clearLine(2);
+        clearLine(3);
+        lcd.setCursor(0, 2);
+
+        if (ARMED) {
+            lcd.print(LANGUAGE ? "Disarmed." : "Deaktiviert.");
+            Serial.println(LANGUAGE ? "Alarm system disarmed." : "Alarmanlage erfolgreich deaktiviert.");
+
+            ARMED = false;
+        }
+        else {
+            for (int i = alarm_activation_time; i > 0; i--) {
+                Serial.println(LANGUAGE ? ("Activating in " + String(i)) : ("Alarmanlage wird aktiviert in " + String(i)));
+                lcd.print(LANGUAGE ? ("Activating in " + String(i)) : ("Aktivierung in " + String(i)));
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            clearAlarms();
+            ARMED = true;
+        }
+        
     }
     else {
         String message = LANGUAGE ? "Wrong tag!" : "Falscher Tag!";
+        lcd.print(message);
+        Serial.println(message);
+        vTaskDelay(500);
     }
+
+    unlockI2CBus();
 
     armTask = NULL;
     vTaskDelete(NULL);
@@ -712,9 +781,9 @@ void setup() {
     rfid_init();
 
 
-    xTaskCreatePinnedToCore(lcdJob, "lcdJob", 5000, NULL, 1, &lcdTask, 0);
+    xTaskCreatePinnedToCore(lcdJob, "lcdJob", 16384, NULL, 1, &lcdTask, 1);
     delay(250);
-    xTaskCreatePinnedToCore(sensorJob, "sensorJob", 5000, NULL, 1, &sensorTask, 0);
+    xTaskCreatePinnedToCore(sensorJob, "sensorJob", 16384, NULL, 1, &sensorTask, 1);
     delay(250);
 
     if (LANGUAGE) Serial.println("Finished Setup");

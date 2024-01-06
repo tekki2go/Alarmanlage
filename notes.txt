@@ -100,7 +100,6 @@ Bewegungsmelder: 12
 
 
 Todo:
-2. Statistiken hinzufügen
 3. Alarmfunktion
 4. Sensoren hinzufügen
 -
