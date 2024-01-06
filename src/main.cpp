@@ -115,7 +115,9 @@ UniversalTelegramBot bot(bot_token, client);
 
 // Task-Handles
 TaskHandle_t lcdTask;
+TaskHandle_t sensorTask;
 
+TaskHandle_t armTask;
 
 #pragma endregion
 
@@ -156,106 +158,6 @@ String currentTime() {
     sprintf(buffer, "%02d/%02d/%04d %02d:%02d:%02d", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
     return String(buffer);
 }
-
-// --------- JOBS UND INTERRUPTS---------
-
-#pragma region jobs
-
-// lcd-aktualisierung
-void lcdJob(void * pvParameters) {
-    if (LANGUAGE) Serial.println("lcd refresher running on core " + String(xPortGetCoreID()));
-    else Serial.println("LCD-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
-
-    lcd.clear();
-
-    for (;;) {
-        IPAddress ip = WiFi.localIP();
-        // Zeile 1: aktuelle Zeit
-        lcd.setCursor(0, 0);
-        lcd.print(currentTime());
-
-        // Zeile 2: Status
-        clearLine(1);
-        lcd.setCursor(0, 1);
-        switch (status) {
-            case 0:
-                lcd.print(String(temperature) + "C, ");
-                lcd.print(String(humidity) + "%");
-                break;
-            case 1:
-                lcd.print("IP: " + ip.toString());
-                break;
-            case 2:
-                lcd.print("Pressure: " + String(pressure) + " , " + String(height) + "m");
-                break;
-        }
-        if (ALARM) {
-            if (LANGUAGE) Serial.println("Alarm triggered!");
-            else Serial.println("Alarm ausgelöst!");
-        }
-
-        // Zeile 3: Alarmstatus
-        //lcd.setCursor(0, 2);
-        //lcd.print("                    "); // zeile löschen
-
-        // Zeile 4
-        //lcd.setCursor(0, 3);
-        //lcd.print("                    "); // zeile löschen
-
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-}
-
-void sensorJob(void * pvParameters) {
-    int i = 1;
-    for (;;) {
-        // alle 50ms
-        if (i%5) pressure = bmp.readPressure()/100;
-
-        // alle 500ms
-        if (i%50) {
-            temperature = dht.readTemperature();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(10)); // 10ms verzögerung
-
-        if (i != 1000) i+=10;
-        else i = 1;
-    }
-}
-
-#pragma endregion
-
-#pragma region Interrupts
-
-void IRAM_ATTR handleArmButtonInterrupt() {
-
-}
-
-void IRAM_ATTR handleResetAlarmButtonInterrupt() {
-    
-}
-
-void IRAM_ATTR handleStatusButtonInterrupt() {
-    status += 1;
-    Serial.println("Status: " + String(status));
-    if (status > 2) status = 0;
-}
-
-void IRAM_ATTR handleTagButtonInterrupt() {
-    
-}
-
-void IRAM_ATTR handleLanguageButtonInterrupt() {
-    LANGUAGE = !LANGUAGE;
-    Serial.println("language");
-}
-
-void IRAM_ATTR handlePhotoelectricInterrupt() {
-    ALARM = true;
-}
-
-#pragma endregion
 
 // --------- RFID ---------
 #pragma region rfid
@@ -453,6 +355,151 @@ void sendLogMessage(String message) {
 // --------- SENSOREN --------
 
 
+// --------- JOBS UND INTERRUPTS---------
+
+#pragma region jobs
+
+// lcd-aktualisierung
+void lcdJob(void * pvParameters) {
+    if (LANGUAGE) Serial.println("lcd refresher running on core " + String(xPortGetCoreID()));
+    else Serial.println("LCD-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
+
+    lcd.clear();
+
+    for (;;) {
+        IPAddress ip = WiFi.localIP();
+        // Zeile 1: aktuelle Zeit
+        lcd.setCursor(0, 0);
+        lcd.print(currentTime());
+
+        // Zeile 2: Status
+        clearLine(1);
+        lcd.setCursor(0, 1);
+        switch (status) {
+            case 0:
+                lcd.print(String(temperature));
+                lcd.print("C, ");
+                lcd.print(String(humidity));
+                lcd.print("%");
+                break;
+            case 1:
+                lcd.print("IP: ");
+                lcd.print(ip.toString());
+                break;
+            case 2:
+                lcd.print(String(pressure));
+                lcd.print("hPa , ");
+                lcd.print(String(height));
+                lcd.print("m");
+                break;
+        }
+        if (ALARM & ARMED) {
+            if (LANGUAGE) Serial.println("Alarm triggered!");
+            else Serial.println("Alarm ausgelöst!");
+        }
+
+        // Zeile 3: Alarmstatus
+        //lcd.setCursor(0, 2);
+        //lcd.print("                    "); // zeile löschen
+
+        // Zeile 4
+        //lcd.setCursor(0, 3);
+        //lcd.print("                    "); // zeile löschen
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+void sensorJob(void * pvParameters) {
+    if (LANGUAGE) Serial.println("sensor refresher running on core " + String(xPortGetCoreID()));
+    else Serial.println("Sensor-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
+
+    for (;;) {
+        pressure = bmp.readPressure()/100;
+        height = bmp.readAltitude(1013.25);
+        temperature = dht.readTemperature();
+        humidity = dht.readHumidity();
+        if (isnan(temperature) || isnan(humidity)) {
+            if (LANGUAGE) Serial.println("Failed to read from DHT sensor!");
+            else Serial.println("Konnte nicht vom DHT-Sensor lesen");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+void armTaskHandle(void * pvParameters) {
+    if (LANGUAGE) Serial.println("Started Arming process on core" + String(xPortGetCoreID()));
+    else Serial.println("Scharfschaltungs-Prozess startet auf Core" + String(xPortGetCoreID()));
+
+    String action_message = ARMED ? (LANGUAGE ? "Disarming ": "Deaktivierungs") : (LANGUAGE ? "Arming " : "Aktivierungs");
+    String process_message = LANGUAGE ? " process started" : "-prozess gestartet";
+    String rfid_message = LANGUAGE ? "Hold your RFID-tag on the reader to confirm!" : "Bitte RFID-Tag an den Leser halten zur Bestätigung!";
+
+    Serial.println(action_message + process_message);
+    Serial.println(rfid_message);
+
+    clearLine(3);
+    lcd.setCursor(0, 3);
+    lcd.print(LANGUAGE ? "Please hold RFID-tag" : "Bitte RFID-Tag an");
+    clearLine(4);
+    lcd.setCursor(0, 4);
+    lcd.print(LANGUAGE ? "on the reader." : "den Leser halten");
+
+    bool tag_verified = search_tag();
+
+    clearLine(3);
+    clearLine(4);
+    lcd.setCursor(0,3);
+
+    if (tag_verified) {
+        String message = LANGUAGE ? "Tag verified." : "Tag verifiziert.";
+        lcd.print(message);
+    }
+    else {
+        String message = LANGUAGE ? "Wrong tag!" : "Falscher Tag!";
+    }
+
+    armTask = NULL;
+    vTaskDelete(NULL);
+
+}
+
+#pragma endregion
+
+#pragma region Interrupts
+
+void IRAM_ATTR handleArmButtonInterrupt() {
+    if (armTask == NULL) {
+        xTaskCreatePinnedToCore(armTaskHandle, "armTask", 10000, NULL, 0, &armTask, 0);
+    }
+}
+
+void IRAM_ATTR handleResetAlarmButtonInterrupt() {
+    
+}
+
+void IRAM_ATTR handleStatusButtonInterrupt() {
+    status += 1;
+    Serial.println("Status: " + String(status));
+    if (status > 2) status = 0;
+}
+
+void IRAM_ATTR handleTagButtonInterrupt() {
+    
+}
+
+void IRAM_ATTR handleLanguageButtonInterrupt() {
+    LANGUAGE = !LANGUAGE;
+    Serial.println("language");
+}
+
+void IRAM_ATTR handlePhotoelectricInterrupt() {
+    ALARM = true;
+}
+
+#pragma endregion
+
 // --------- EINRICHTUNG ---------
 #pragma region setup
 
@@ -525,20 +572,14 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, FALLING);
 
 
-    // Initialisieren des Haupt-I2C-Busses
+    // Initialisieren des I2C-Busses
     //mainWire.begin(mainSDA, mainSCL, mainClockSpeed);
     Wire.begin(mainSDA, mainSCL, mainClockSpeed);
 
-    // Initialisieren des LCD-Displays mit mainWire
+    // Initialisieren des LCD-Displays
     lcd.init();
     lcd.clear();
     lcd.backlight();
-
-    // BMP280 mit mainWire
-    if (!bmp.begin()) {
-        if (LANGUAGE) Serial.println("Could not find a valid BMP280 !");
-        else Serial.println("Es konnte kein BMP280 gefunden werden!");
-    }
 
     // Initialisieren des SPI-Busses
     SPI.begin(vspi_clk_pin, vspi_miso_pin, vspi_mosi_pin, vspi_ss_pin);
@@ -563,16 +604,23 @@ void setup() {
     }
 
     // Sensoren
+    // BMP280 (luftdruck)
+    if (!bmp.begin()) {
+        if (LANGUAGE) Serial.println("Could not find a valid BMP280 !");
+        else Serial.println("Es konnte kein BMP280 gefunden werden!");
+    }
+
+    // DHT11 (Temperatur, Luftfeuchtigkeit)
     dht.begin();
 
 
     rfid_init();
 
 
-    xTaskCreatePinnedToCore(lcdJob, "lcdJob", 10000, NULL, 1, &lcdTask, 0);
+    xTaskCreatePinnedToCore(lcdJob, "lcdJob", 5000, NULL, 1, &lcdTask, 0);
     delay(250);
-    //xTaskCreatePinnedToCore(inputChecker, "inputChecker", 10000, NULL, 1, &inputTask, 0);
-    //delay(250);
+    xTaskCreatePinnedToCore(sensorJob, "sensorJob", 1000, NULL, 1, &sensorTask, 0);
+    delay(250);
 
     if (LANGUAGE) Serial.println("Finished Setup");
     else Serial.println("Einrichtung abgeschlossen");
@@ -594,15 +642,6 @@ void loop() {
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
     last_bot_refresh = millis();
-    }
-
-    pressure = bmp.readPressure()/100;
-    height = bmp.readAltitude(1013.25);
-    temperature = dht.readTemperature();
-    humidity = dht.readHumidity();
-    if (isnan(temperature) || isnan(humidity)) {
-        if (LANGUAGE) Serial.println("Failed to read from DHT sensor!");
-        else Serial.println("Konnte nicht vom DHT-Sensor lesen");
     }
 
     delay(500);
