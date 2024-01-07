@@ -46,6 +46,7 @@ String logging_chat_ids[] = {
     "5639436151"
 };
 
+
 #pragma region settings
 
 // Sensor-Sensibilität
@@ -55,6 +56,7 @@ const int pressure_tolerance = 10; //Luftdruck-Toleranz in hPa
 int alarm_activation_time = 30;        // Zeit in Sekunden, bis die Alarmanlage aktiviert wird
 int bot_request_delay = 1000;          // Telegram-Bot prüft alle 1000 ms ob neue Nachrichten vorhanden sind
 int debounce_time = 500;               // Button-Interrupts dürfen nur alle 500ms getriggert werden
+int sensor_debounce_time = 5000;       // Sensor-Interrupts dürfen nur alle 5 Sekunden getriggert werden
 
 // NTP Server Einstellungen
 const char* ntpServer = "pool.ntp.org";
@@ -143,11 +145,17 @@ volatile unsigned long last_status_interrupt_time = 0;
 volatile unsigned long last_tag_interrupt_time = 0;
 volatile unsigned long last_language_interrupt_time = 0;
 
+// sensor timings
+volatile unsigned long last_photoelectric_interrupt_time = 0;
+
 // variable für letzten refresh der nachrichten
 unsigned long last_bot_refresh;
 
 // variable zur verhinderung von mehreren I2C-Zugriffen gleichzeitig
 volatile bool i2c_lock = false;
+
+// enthält den Zeitstempel der letzten Status-Änderung
+String last_status_change;
 
 // Variable für Dateien
 File whitelistFile;
@@ -173,6 +181,7 @@ String currentTime() {
 
 void clearAlarms() {
 
+    ALARM = false;
 }
 
 void lockI2CBus() {
@@ -398,11 +407,14 @@ void handleNewMessages(int numNewMessages) {
         bot.sendMessage(chatID, welcome, "");
         }
 
-        // WIP!
+        
         if (text == "/status") {
+            String activated = ARMED ? "Ja" : "Nein";
+
             String message = "Status-Bericht: \n";
-            message += "Aktiviert: " + String(temperature, 1) + " °C\n";
-            message += "Letzte Aktivierung: " + String(pressure, 2) + " hPa\n";
+            message += "Aktiviert: " + activated + " \n";
+            message += "Letzte Status-Änderung: " + last_status_change + " \n";
+            message += "Tags eingespeichert: " + String(tag_amount()) + "\n";
             bot.sendMessage(chatID, message, "");
         }
         
@@ -546,9 +558,11 @@ void armTaskHandle(void * pvParameters) {
     clearLine(3);
     lcd.setCursor(0, 3);
     lcd.print(LANGUAGE ? "on the reader." : "den Leser halten");
+    unlockI2CBus();
 
     bool tag_verified = search_tag();
 
+    lockI2CBus();
     clearLine(2);
     clearLine(3);
     lcd.setCursor(0,2);
@@ -578,6 +592,7 @@ void armTaskHandle(void * pvParameters) {
             clearAlarms();
             ARMED = true;
         }
+        String last_status_change = currentTime();
         
     }
     else {
@@ -659,7 +674,13 @@ void IRAM_ATTR handleLanguageButtonInterrupt() {
 }
 
 void IRAM_ATTR handlePhotoelectricInterrupt() {
-    ALARM = true;
+    unsigned long interruptTime = millis();
+
+    if (interruptTime - last_photoelectric_interrupt_time > sensor_debounce_time) {
+        ALARM = true;
+
+        last_photoelectric_interrupt_time = interruptTime;
+    }
 }
 
 #pragma endregion
@@ -689,7 +710,7 @@ void initial_setup(bool noFile) {
     
     if (LANGUAGE) Serial.println("Please hold the rfid tag to the reader!");
     else Serial.println("Bitte den RFID-Tag an den Leser halten!");
-
+    
     save_tag();
 }
 
@@ -733,7 +754,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(tag_button_pin), &handleTagButtonInterrupt, FALLING);
     attachInterrupt(digitalPinToInterrupt(language_button_pin), &handleLanguageButtonInterrupt, FALLING);
     
-    attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, FALLING);
+    attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
 
 
     // Initialisieren des I2C-Busses
