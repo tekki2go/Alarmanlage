@@ -136,7 +136,7 @@ float pressure;        // aktueller Luftdruck
 float height;          // aktuelle Höhe (m)
 
 int status = 0;        // was gerade in der Status-Anzeige gezeigt wird
-// 0 = Temperatur + Luftfeuchtigkeit, 1 = IP
+// 0 = Temperatur + Luftfeuchtigkeit, 1 = IP, 2 = Luftdruck + höhe
 
 // debounce timings
 volatile unsigned long last_arm_interrupt_time = 0;
@@ -205,16 +205,14 @@ void rfid_init() {
 
     // Überprüfen, ob die Whitelist-Datei geöffnet werden kann
     if (!whitelistFile) {
-        if (LANGUAGE) Serial.println("Whitelist file not found. Setup required.");
-        else Serial.println("Whitelist-Datei nicht gefunden. Einrichtung erforderlich.");
+        Serial.println(LANGUAGE ? "Whitelist file not found. Setup required." : "Whitelist-Datei nicht gefunden. Einrichtung erforderlich.");
         initial_setup(true);
         return;
     }
     
     // Überprüfen, ob Tags in der Whitelist vorhanden sind
     if (whitelistFile.size() == 0) {
-        if (LANGUAGE) Serial.println("No tags in the whitelist. Setup required.");
-        else Serial.println("Keine Tags in der Whitelist. Einrichtung erforderlich.");
+        Serial.println(LANGUAGE ? "No tags in the whitelist. Setup required." : "Keine Tags in der Whitelist. Einrichtung erforderlich.");
         initial_setup(false);
     }
     
@@ -223,11 +221,10 @@ void rfid_init() {
 
 void save_tag() {
     lcd.setCursor(0, 2);
-    if (LANGUAGE) lcd.print("Please hold an RFID");
-    else lcd.print(" Bitte den RFID-Tag ");
+    lcd.print(LANGUAGE ? "Please hold an RFID" : " Bitte den RFID-Tag ");
     lcd.setCursor(0, 3);
-    if (LANGUAGE) lcd.print("tag to the reader!");
-    else lcd.print("an den Leser halten!");
+    lcd.print(LANGUAGE ? "tag to the reader!" : "an den Leser halten!");
+
 
     for (;;) {
         // Überprüfen, ob eine RFID-Karte vorhanden ist
@@ -241,30 +238,26 @@ void save_tag() {
                     tagData += String(mfrc522.uid.uidByte[i], HEX);
                 }
 
-                Serial.println("Tag gefunden: " + tagData);
+                Serial.println((LANGUAGE ? "Tag found: " : "Tag gefunden: ") + tagData);
 
                 whitelistFile.println(tagData);
                 whitelistFile.close();
-                if (LANGUAGE) Serial.println("Tag saved successfully.");
-                else Serial.println("Tag erfolgreich gespeichert.");
+                Serial.println(LANGUAGE ? "Tag saved successfully." : "Tag erfolgreich gespeichert.");
 
                 clearLine(2);
                 clearLine(3);
                 lcd.setCursor(0, 2);
-                if (LANGUAGE) lcd.print("RFID-Tag saved.");
-                else lcd.print("RFID-Tag gespeichert");
+                lcd.print(LANGUAGE ? "RFID-Tag saved." : "RFID-Tag gespeichert");
 
                 delay(1000);
                 clearLine(2);
                 clearLine(3);
             } else {
-                if (LANGUAGE) Serial.println("Failed to open whitelist file for writing.");
-                else Serial.println("Fehler beim Öffnen der Whitelist-Datei zum Schreiben.");
+                Serial.println(LANGUAGE ? "Failed to open whitelist file for writing." : "Fehler beim Öffnen der Whitelist-Datei zum Schreiben.");
                 clearLine(2);
                 clearLine(3);
                 lcd.setCursor(0, 2);
-                if (LANGUAGE) lcd.print("Error while saving!");
-                else lcd.print("Fehler beim Speichern!");
+                lcd.print(LANGUAGE ? "Error while saving!" : "Fehler beim Speichern!");
             }
             return;
         }
@@ -280,7 +273,7 @@ bool delete_tag() {
                 tagData += String(mfrc522.uid.uidByte[i], HEX);
             }
 
-            Serial.println("Tag gefunden: " + tagData);
+            Serial.println((LANGUAGE ? "Tag found: " : "Tag gefunden: ") + tagData);
             
             whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
             File tempFile = SPIFFS.open("/rfid/temp.txt", "w");
@@ -301,13 +294,11 @@ bool delete_tag() {
                 SPIFFS.remove("/rfid/rfid_tags.txt");
                 SPIFFS.rename("/rfid/temp.txt", "/rfid/rfid_tags.txt");
 
-                if (LANGUAGE) Serial.println("Successfully deleted Tag.");
-                else Serial.println("Tag erfolgreich gelöscht");                
+                Serial.println(LANGUAGE ? "Successfully deleted Tag." : "Tag erfolgreich gelöscht");    
                 return true;
             }
 
-            if (LANGUAGE) Serial.println("Could not find Tag!");
-            else Serial.println("Tag konnte nicht gefunden werden!");
+            Serial.println(LANGUAGE ? "Could not find Tag!" : "Tag konnte nicht gefunden werden!");
             return false;
         }
     }
@@ -322,7 +313,7 @@ bool search_tag() {
                 tagData += String(mfrc522.uid.uidByte[i], HEX);
             }
 
-            Serial.println("Tag gefunden: " + tagData);
+            Serial.println((LANGUAGE ? "Tag found: " : "Tag gefunden: ") + tagData);
             
             whitelistFile = SPIFFS.open("/rfid/rfid_tags.txt", "r");
             
@@ -332,9 +323,7 @@ bool search_tag() {
                 while (whitelistFile.available()) {
                     line = whitelistFile.readStringUntil('\n');
                     line.trim();
-                    Serial.println(line);                                 //REMOVE LATER!!!!!!!!!!!!!!!!!!!!!
-                    // == mit contain ersetzt für zuverlässigere erkennung
-                    if (line == tagData) { //.indexOf(tagData) > 0) {
+                    if (line == tagData) {
                         whitelistFile.close();
                         return true;
                     }
@@ -351,8 +340,7 @@ int tag_amount() {
 
     // Prüfen ob die whitelist-datei geöffnet werden kann
     if (!whitelistFile) {
-        if (LANGUAGE) Serial.println("Failed to open whitelist file.");
-        else Serial.println("Fehler beim Öffnen der Whitelist-Datei.");
+        Serial.println(LANGUAGE ? "Failed to open whitelist file." : "Fehler beim Öffnen der Whitelist-Datei.");
         return -1; // wegen fehler -1 zurückgeben
     }
 
@@ -373,8 +361,7 @@ int tag_amount() {
 #pragma region telegram
 
 void handleNewMessages(int numNewMessages) {
-    if (LANGUAGE) Serial.print("Received " + String(numNewMessages) + " new messages.");
-    else Serial.print(String(numNewMessages) + " Neue Nachrichten erhalten.");
+    Serial.print(LANGUAGE ? "Received " + String(numNewMessages) + " new messages." : String(numNewMessages) + " Neue Nachrichten erhalten.");
 
     bool is_authorized = false;
 
@@ -447,8 +434,7 @@ void sendLogMessage(String message) {
 
 // lcd-aktualisierung
 void lcdJob(void * pvParameters) {
-    if (LANGUAGE) Serial.println("lcd refresher running on core " + String(xPortGetCoreID()));
-    else Serial.println("LCD-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
+    Serial.println(LANGUAGE ? "lcd refresher running on core " + String(xPortGetCoreID()) : "LCD-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
 
     lockI2CBus();
     lcd.clear();
@@ -484,12 +470,11 @@ void lcdJob(void * pvParameters) {
         }
 
         if (ALARM & ARMED) {
-            if (LANGUAGE) Serial.println("Alarm triggered!");
-            else Serial.println("Alarm ausgelöst!");
+            Serial.println(LANGUAGE ? "Alarm triggered!" : "Alarm ausgelöst!");
 
             clearLine(2);
             lcd.setCursor(0, 2);
-            lcd.print("  ALARM AUSGELOEST  ");
+            lcd.print(LANGUAGE ? "ALARM TRIGGERED" : "  ALARM AUSGELOEST  ");
         }
 
         // Zeile 3: Alarmstatus
@@ -506,8 +491,7 @@ void lcdJob(void * pvParameters) {
 }
 
 void sensorJob(void * pvParameters) {
-    if (LANGUAGE) Serial.println("sensor refresher running on core " + String(xPortGetCoreID()));
-    else Serial.println("Sensor-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
+    Serial.println(LANGUAGE ? "sensor refresher running on core " + String(xPortGetCoreID()) : "Sensor-Aktualisierer läuft auf Core " + String(xPortGetCoreID()));
 
     for (;;) {
         lockI2CBus();
@@ -519,8 +503,7 @@ void sensorJob(void * pvParameters) {
         unlockI2CBus();
 
         if (isnan(new_temperature) || isnan(new_humidity)) {
-            if (LANGUAGE) Serial.println("Failed to read from DHT sensor!");
-            else Serial.println("Konnte nicht vom DHT-Sensor lesen");
+            Serial.println(LANGUAGE ? "Failed to read from DHT sensor!" : "Konnte nicht vom DHT-Sensor lesen");
         }
         else {
             temperature = new_temperature;
@@ -528,8 +511,7 @@ void sensorJob(void * pvParameters) {
         }
 
         if (isnan(new_pressure) || isnan(new_height)) {
-            if (LANGUAGE) Serial.println("Failed to read from BMP280 sensor!");
-            else Serial.println("Konnte nicht vom BMP280-Sensor lesen");
+            Serial.println(LANGUAGE ? "Failed to read from BMP280 sensor!" : "Konnte nicht vom BMP280-Sensor lesen");
         }
         else {
             pressure = new_pressure;
@@ -541,8 +523,7 @@ void sensorJob(void * pvParameters) {
 }
 
 void armTaskHandle(void * pvParameters) {
-    if (LANGUAGE) Serial.println("Started Arming process on core" + String(xPortGetCoreID()));
-    else Serial.println("Scharfschaltungs-Prozess startet auf Core" + String(xPortGetCoreID()));
+    Serial.println(LANGUAGE ? "Started Arming process on core" + String(xPortGetCoreID()) : "Scharfschaltungs-Prozess startet auf Core" + String(xPortGetCoreID()));
 
     String action_message = ARMED ? (LANGUAGE ? "Disarming ": "Deaktivierungs") : (LANGUAGE ? "Arming " : "Aktivierungs");
     String process_message = LANGUAGE ? " process started" : "-prozess gestartet";
@@ -692,24 +673,19 @@ void initial_setup(bool noFile) {
     if (noFile) {
         if (!SPIFFS.exists("/rfid")) {
             if (!SPIFFS.mkdir("/rfid")) {
-                if (LANGUAGE) Serial.println("Failed to create folder rfid!");
-                else Serial.println("Ordner rfid konnte nicht erstellt werden!");
+                Serial.println(LANGUAGE ? "Failed to create folder rfid!" : "Ordner rfid konnte nicht erstellt werden!");
                 for (;;);
             }
             File file = SPIFFS.open("/rfid/rfid_tags.txt", "w");
             if (!file) {
-                if (LANGUAGE) Serial.println("Failed to create file rfid_flags.txt!");
-                else Serial.println("Datei rfid_flags.txt konnte nicht erstellt werden!");
+                Serial.println(LANGUAGE ? "Failed to create file rfid_flags.txt!" : "Datei rfid_flags.txt konnte nicht erstellt werden!");
                 for (;;);
             }
             file.close();
-            if (LANGUAGE) Serial.println("Successfully created rfid_tags.txt");
-            else Serial.println("rfid_tags.txt wurde erfolgreich erstellt");
+            Serial.println(LANGUAGE ? "Successfully created rfid_tags.txt" : "rfid_tags.txt wurde erfolgreich erstellt");
         }
     }
     
-    if (LANGUAGE) Serial.println("Please hold the rfid tag to the reader!");
-    else Serial.println("Bitte den RFID-Tag an den Leser halten!");
     
     save_tag();
 }
@@ -719,23 +695,19 @@ void setup() {
     Serial.begin(115200);
     //esp_log_level_set(TAG, ESP_LOG_INFO);
 
-    if (LANGUAGE) Serial.println("Setup running on Core " + String(xPortGetCoreID()));
-    else Serial.println("Setup läuft auf Core " + String(xPortGetCoreID()));
+    Serial.println(LANGUAGE ? "Setup running on Core " + String(xPortGetCoreID()) : "Setup läuft auf Core " + String(xPortGetCoreID()));
 
     // Mit WLAN verbinden
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-        if (LANGUAGE) Serial.println("Connecting to WiFi...");
-        else Serial.println("Verbindung zu WiFi wird hergestellt...");
+        Serial.println(LANGUAGE ? "Connecting to WiFi..." : "Verbindung zu WiFi wird hergestellt...");
     }
-    if (LANGUAGE) Serial.println("Connected to WiFi");
-    else Serial.println("Mit WiFi verbunden");
+    Serial.println(LANGUAGE ? "Connected to WiFi" : "Mit WiFi verbunden");
 
     // Root-Zertifikat für SSL hinzufügen (Telegram-Bot)
     client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
     //sendLogMessage("beginning...");
-    bot.sendMessage("539436151", "TEST", "");
     delay(500);
     
     // Buttons als input konfigurieren
@@ -771,28 +743,23 @@ void setup() {
 
     // RTC initialisieren und mit NTP synchronisieren
     if (!rtc.begin(&Wire)) {
-        if (LANGUAGE) Serial.println("Could not find valid rtc, check wiring!");
-        else Serial.println("RTC nicht gefunden, bitte Verkabelung überprüfen!");
+        Serial.println(LANGUAGE ? "Could not find valid rtc, check wiring!" : "RTC nicht gefunden, bitte Verkabelung überprüfen!");
     }
 
     timeClient.begin();
     timeClient.update();
     rtc.adjust(DateTime(timeClient.getEpochTime()));
-    if (LANGUAGE) Serial.println("Initialized RTC, current time: " + String(currentTime()));
-    else Serial.println("RTC initialisiert, aktuelle Zeit: " + String(currentTime()));
-
+    Serial.println(LANGUAGE ? "Initialized RTC, current time: " + String(currentTime()) : "RTC initialisiert, aktuelle Zeit: " + String(currentTime()));
 
     if (!SPIFFS.begin(true)) {
-        if (LANGUAGE) Serial.println("Failed to mount file system");
-        else Serial.println("Dateisystem konnte nicht gemountet werden");
+        Serial.println(LANGUAGE ? "Failed to mount file system" : "Dateisystem konnte nicht gemountet werden");
         return;
     }
 
     // Sensoren
     // BMP280 (luftdruck)
     if (!bmp.begin()) {
-        if (LANGUAGE) Serial.println("Could not find a valid BMP280 !");
-        else Serial.println("Es konnte kein BMP280 gefunden werden!");
+        Serial.println(LANGUAGE ? "Could not find a valid BMP280 !" : "Es konnte kein BMP280 gefunden werden!");
     }
 
     // DHT11 (Temperatur, Luftfeuchtigkeit)
@@ -807,8 +774,7 @@ void setup() {
     xTaskCreatePinnedToCore(sensorJob, "sensorJob", 16384, NULL, 1, &sensorTask, 1);
     delay(250);
 
-    if (LANGUAGE) Serial.println("Finished Setup");
-    else Serial.println("Einrichtung abgeschlossen");
+    Serial.println(LANGUAGE ? "Finished Setup" : "Einrichtung abgeschlossen");
 }
 
 #pragma endregion
