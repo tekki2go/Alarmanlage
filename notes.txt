@@ -64,10 +64,6 @@ LCD, DS1307, HW-611:
 SDA: 21
 SCL: 22
 
-Pin extender:
-SDA: 16
-SCL: 17
-
 RFID reader:
 MOSI: 23
 MISO: 19

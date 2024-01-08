@@ -25,6 +25,8 @@
 #include <ArduinoJson.h>
 // Pin extender
 #include <MCP23017.h>
+// WDT
+#include "soc/rtc_wdt.h"
 
 #pragma endregion
 
@@ -69,28 +71,28 @@ const int mainSCL = 22;
 const int mainClockSpeed = 100000; // 100kHz Taktgeschwindigkeit
 
 // RFID-Lesegerät Einstellungen
-const int vspi_mosi_pin = 23;
-const int vspi_miso_pin = 19;
-const int vspi_clk_pin = 18;
-const int vspi_ss_pin = 5;
-const int rfid_rst_pin = 4;
+const int vspi_mosi_pin = 19;
+const int vspi_miso_pin = 18;
+const int vspi_clk_pin = 5;
+const int vspi_ss_pin = 17;
+const int rfid_rst_pin = 23;
 
 // Pin-Einstellungen
-const int piezo_pin = 0;                 // Piezo-Piepser
+const int piezo_pin = 4;                 // Piezo-Piepser
 const int led_red_pin = 2;               // Rote LED
-const int led_green_pin = 15;            // Grüne LED
+const int led_green_pin = 0;             // Grüne LED
 
-const int arm_button_pin = 13;           // Taster 1
-const int reset_alarm_button_pin = 12;   // Taster 2
-const int status_button_pin = 14;        // Taster 3
-const int tag_button_pin = 27;           // Taster 4
-const int language_button_pin = 26;      // Taster 5
+const int arm_button_pin = 32;           // Taster 1
+const int reset_alarm_button_pin = 25;   // Taster 2
+const int status_button_pin = 27;        // Taster 3
+const int tag_button_pin = 14;           // Taster 4
+const int language_button_pin = 12;      // Taster 5
 
-const int photoelectric_sensor_pin = 34; // Lichtschranke
+const int photoelectric_sensor_pin = 13; // Lichtschranke
 const int radar_sensor_pin = 35;         // Radar
-const int microphone_pin = 32;           // Mikrofon
+const int microphone_pin = 34;           // Mikrofon
 const int dht11_pin = 33;                // DHT11
-const int movement_sensor_pin = 25;      // Bewegungsmelder
+const int movement_sensor_pin = 26;      // Bewegungsmelder
 
 
 // Log-Einstellungen
@@ -793,7 +795,9 @@ void loop() {
     last_bot_refresh = millis();
     }
 
-    delay(500);
+    //rtc_wdt_feed();
+
+    delay(100);
 }
 
 #pragma endregion
