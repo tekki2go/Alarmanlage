@@ -164,7 +164,7 @@ String last_status_change;
 File whitelistFile;
 
 // Timer variablen
-uint timer_1000ms_count = 0;
+volatile uint timer_100ms_count = 0;
 
 // Funktionen
 void initial_setup(bool noFile);
@@ -398,6 +398,7 @@ void updateLCD() {
     // Zeile 4
     //lcd.setCursor(0, 3);
     //lcd.print("                    "); // zeile löschen
+    delay(25);
 }
 
 void updateBMP280Data() {
@@ -411,6 +412,7 @@ void updateBMP280Data() {
         pressure = new_pressure;
         height = new_height;
     }
+    delay(25);
 }
 
 void updateDHTData() {
@@ -693,22 +695,8 @@ void getMessages() {
 
 // --------- TIMER ---------
 #pragma region timers
-void timer_1000ms_callback(void * pvParameters) {
-    // alle 2 Sekunden
-    if (timer_1000ms_count % 2 == 0) {
-        updateDHTData();
-    }
-
-    updateBMP280Data();
-    delay(25);
-    if (armTask == NULL | eTaskGetState(armTask) != eRunning) {
-        updateLCD();
-        delay(100);
-    }
-    else Serial.println("armTask active!");
-
-    getMessages();
-    timer_1000ms_count++;
+void timer_100ms_callback(void * pvParameters) {
+    timer_100ms_count++;
 }
 #pragma endregion
 
@@ -808,13 +796,13 @@ void setup() {
 
     rfid_init();
 
-    const esp_timer_create_args_t timer_1000ms_args = {
-        .callback = &timer_1000ms_callback,
+    const esp_timer_create_args_t timer_100ms_args = {
+        .callback = &timer_100ms_callback,
         .arg = NULL,
-        .name = "Timer1000ms"
+        .name = "Timer100ms"
     };
-    esp_timer_create(&timer_1000ms_args, &timer_handle_fast);
-    esp_timer_start_periodic(timer_handle_fast, 1000000); // 1000ms
+    esp_timer_create(&timer_100ms_args, &timer_handle_fast);
+    esp_timer_start_periodic(timer_handle_fast, 100000); // 100ms
 
     sendLogMessage("Startup finished.");
 
@@ -827,6 +815,24 @@ void setup() {
 #pragma region loop
 
 void loop() {
+    // alle 500ms
+    if (timer_100ms_count % 5 == 0) {
+        updateBMP280Data();
+    }
+
+    // jede sekunde
+    if (timer_100ms_count % 10 == 0) {
+        if (armTask == NULL) updateLCD();
+        else if (eTaskGetState(armTask) != eRunning) updateLCD();
+        else Serial.println("armTask active!");
+
+        getMessages();
+    }
+
+    // alle 2 Sekunden
+    if (timer_100ms_count % 20 == 0) {
+        updateDHTData();
+    }
 }
 
 #pragma endregion
