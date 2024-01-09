@@ -29,8 +29,17 @@
 #pragma endregion
 
 // Netzwerkdaten
-const char* ssid = "tkNOC_IoT";
-const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
+// zuhause
+//const char* ssid = "tkNOC_IoT";
+//const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
+
+// Laptop
+const char* ssid = "WIN-452L88FNHCT 3783";
+const char* password = "523q8|1B";
+
+// Handy
+//const char* ssid = "Eierfon 13";
+//const char* password = "xQA_52Le";
 
 // Token des Telegram-bots
 const char* bot_token = "6923232009:AAGqJnmC9oe915CyHLO3OMCKHy9U8muVG1Q";
@@ -56,7 +65,6 @@ const int pressure_tolerance = 10; //Luftdruck-Toleranz in hPa
 int alarm_activation_time = 30;        // Zeit in Sekunden, bis die Alarmanlage aktiviert wird
 int bot_request_delay = 1000;          // Telegram-Bot prüft alle 1000 ms ob neue Nachrichten vorhanden sind
 int debounce_time = 500;               // Button-Interrupts dürfen nur alle 500ms getriggert werden
-int sensor_debounce_time = 5000;       // Sensor-Interrupts dürfen nur alle 5 Sekunden getriggert werden
 
 // NTP Server Einstellungen
 const char* ntpServer = "pool.ntp.org";
@@ -69,8 +77,8 @@ const int mainSCL = 22;
 const int mainClockSpeed = 100000; // 100kHz Taktgeschwindigkeit
 
 // RFID-Lesegerät Einstellungen
-const int vspi_mosi_pin = 19;
-const int vspi_miso_pin = 18;
+const int vspi_mosi_pin = 18;
+const int vspi_miso_pin = 19;
 const int vspi_clk_pin = 5;
 const int vspi_ss_pin = 17;
 const int rfid_rst_pin = 23;
@@ -80,17 +88,17 @@ const int piezo_pin = 4;                 // Piezo-Piepser
 const int led_red_pin = 2;               // Rote LED
 const int led_green_pin = 0;             // Grüne LED
 
-const int arm_button_pin = 32;           // Taster 1
-const int reset_alarm_button_pin = 25;   // Taster 2
+const int arm_button_pin = 12;           // Taster 1
+const int reset_alarm_button_pin = 14;   // Taster 2
 const int status_button_pin = 27;        // Taster 3
-const int tag_button_pin = 14;           // Taster 4
-const int language_button_pin = 12;      // Taster 5
+const int tag_button_pin = 25;           // Taster 4
+const int language_button_pin = 32;      // Taster 5
 
 const int photoelectric_sensor_pin = 13; // Lichtschranke
 const int radar_sensor_pin = 35;         // Radar
 const int microphone_pin = 34;           // Mikrofon
-const int dht11_pin = 26;                // DHT11 33
-const int movement_sensor_pin = 33;      // Bewegungsmelder 26
+const int dht11_pin = 33;                // DHT11
+const int movement_sensor_pin = 26;      // Bewegungsmelder
 
 
 // Log-Einstellungen
@@ -116,9 +124,6 @@ WiFiClientSecure client;
 UniversalTelegramBot bot(bot_token, client);
 
 // Task-Handles
-TaskHandle_t lcdTask;
-TaskHandle_t sensorTask;
-
 TaskHandle_t armTask;
 TaskHandle_t resetTask;
 
@@ -138,17 +143,12 @@ float height;          // aktuelle Höhe (m)
 int status = 0;        // was gerade in der Status-Anzeige gezeigt wird
 // 0 = Temperatur + Luftfeuchtigkeit, 1 = IP, 2 = Luftdruck + höhe
 
-int loop_ticks = 0;    // für starten der jobs
-
 // debounce timings
 volatile unsigned long last_arm_interrupt_time = 0;
 volatile unsigned long last_reset_interrupt_time = 0;
 volatile unsigned long last_status_interrupt_time = 0;
 volatile unsigned long last_tag_interrupt_time = 0;
 volatile unsigned long last_language_interrupt_time = 0;
-
-// sensor timings
-volatile unsigned long last_photoelectric_interrupt_time = 0;
 
 // variable für letzten refresh der nachrichten
 unsigned long last_bot_refresh;
@@ -166,9 +166,11 @@ File whitelistFile;
 
 // Funktionen
 void initial_setup(bool noFile);
+void sendLogMessage();
 void IRAM_ATTR handlePhotoelectricInterrupt();
-
-// --------- Nützliche Funktionen ---------
+void IRAM_ATTR handleRadarInterrupt();
+void IRAM_ATTR handleMicrophoneInterrupt();
+void IRAM_ATTR handleMovementInterrupt();
 
 void clearLine(int line) {
     lcd.setCursor(0, line);
@@ -177,20 +179,9 @@ void clearLine(int line) {
 
 String currentTime() {
     DateTime now = rtc.now();
-    char buffer[20]; // Puffer für formatierte Zeit
+    char buffer[30]; // Puffer für formatierte Zeit
     sprintf(buffer, "%02d/%02d/%04d %02d:%02d:%02d", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
     return String(buffer);
-}
-
-void lockI2CBus() {
-    while (i2c_lock) {
-        delay(30);
-    }
-    i2c_lock = true;
-}
-
-void unlockI2CBus() {
-    i2c_lock = false;
 }
 
 // --------- RFID ---------
@@ -355,74 +346,6 @@ int tag_amount() {
 
 #pragma endregion rfid
 
-// --------- TELEGRAM-BOT --------
-#pragma region telegram
-
-void handleNewMessages(int numNewMessages) {
-    Serial.print(LANGUAGE ? "Received " + String(numNewMessages) + " new messages." : String(numNewMessages) + " Neue Nachrichten erhalten.");
-
-    bool is_authorized = false;
-
-    for (int i=0; i<numNewMessages; i++) {
-        // Chat id of the requester
-        String chatID = String(bot.messages[i].chat_id);
-        for (int i = 0; i < sizeof(chat_ids); i++) {
-            if (chatID == chat_ids[i]) {
-                is_authorized = true;
-                break;
-            }
-        }
-
-        if (!is_authorized) bot.sendMessage(chatID, "Unauthorized user", "");
-        
-        // Print the received message
-        String text = bot.messages[i].text;
-
-        String from_name = bot.messages[i].from_name;
-
-        if (text == "/start") {
-        String welcome = "Willkommen, " + from_name + ".\n";
-        welcome += "Benutze einen der folgenden Befehle:\n\n";
-        welcome += "/status gibt einen Status-Bericht aus\n";
-        welcome += "/sensors gibt die aktuellen Sensor-werte aus\n\n";
-        welcome += "Funktionen, die einen RFID-Tag benötigen:\n";
-        welcome += "/arm aktiviert die Alarmanlage\n";
-        welcome += "/disarm deaktiviert die Alarmanlage\n";
-        welcome += "/deactivate stoppt einen aktivierten Alarm und deaktiviert die Alarmanlage";
-        bot.sendMessage(chatID, welcome, "");
-        }
-
-        
-        if (text == "/status") {
-            String activated = ARMED ? "Ja" : "Nein";
-
-            String message = "Status-Bericht: \n";
-            message += "Aktiviert: " + activated + " \n";
-            message += "Letzte Status-Änderung: " + last_status_change + " \n";
-            message += "Tags eingespeichert: " + String(tag_amount()) + "\n";
-            bot.sendMessage(chatID, message, "");
-        }
-        
-        if (text == "/sensors") {
-            String message = "Sensor-Werte: \n";
-            message += "Temperatur: " + String(temperature, 1) + " °C\n";
-            message += "Luftfeuchtigkeit: " + String(humidity, 0) + " %\n";
-            message += "Luftdruck: " + String(pressure, 2) + " hPa\n";
-            message += "Höhe: " + String(height, 2) + " m\n";
-            bot.sendMessage(chatID, message, "");
-        }
-    }
-}
-
-void sendLogMessage(String message) {
-    bot.sendMessage((String) *logging_chat_ids, message, "");
-}
-
-#pragma endregion
-
-// --------- SENSOREN --------
-
-
 // --------- JOBS UND INTERRUPTS---------
 
 #pragma region jobs
@@ -471,9 +394,6 @@ void updateLCD() {
     // Zeile 4
     //lcd.setCursor(0, 3);
     //lcd.print("                    "); // zeile löschen
-
-    //lcdTask = NULL;
-    //vTaskDelete(NULL);
 }
 
 void updateSensorData() {
@@ -487,7 +407,9 @@ void updateSensorData() {
         pressure = new_pressure;
         height = new_height;
     }
-
+    
+    // DHT defekt, bis zum Austausch auskommentiert
+    /*
     float new_temperature = dht.readTemperature();
     float new_humidity = dht.readHumidity();
 
@@ -498,9 +420,7 @@ void updateSensorData() {
         temperature = new_temperature;
         humidity = new_humidity;
     }
-
-    //sensorTask = NULL;
-    //vTaskDelete(NULL);
+    */
 }
 
 void armTaskHandle(void * pvParameters) {
@@ -541,15 +461,18 @@ void armTaskHandle(void * pvParameters) {
             Serial.println(LANGUAGE ? "Alarm system disarmed." : "Alarmanlage erfolgreich deaktiviert.");
 
             ARMED = false;
+            last_status_change = currentTime();
             detachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin));
         }
         else {
             for (int i = alarm_activation_time; i > 0; i--) {
+                clearLine(2);
                 Serial.println(LANGUAGE ? ("Activating in " + String(i)) : ("Alarmanlage wird aktiviert in " + String(i)));
                 lcd.print(LANGUAGE ? ("Activating in " + String(i)) : ("Aktivierung in " + String(i)));
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
             ARMED = true;
+            last_status_change = currentTime();
 
             attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
 
@@ -579,6 +502,8 @@ void resetTaskHandle(void * pvParameters) {
 #pragma endregion
 
 #pragma region Interrupts
+
+// --- BUTTONS ---
 
 void IRAM_ATTR handleArmButtonInterrupt() {
     unsigned long interruptTime = millis();
@@ -633,14 +558,22 @@ void IRAM_ATTR handleLanguageButtonInterrupt() {
     }
 }
 
+// --- SENSOREN ---
+
 void IRAM_ATTR handlePhotoelectricInterrupt() {
-    unsigned long interruptTime = millis();
+    ALARM = true;
+}
 
-    if (interruptTime - last_photoelectric_interrupt_time > sensor_debounce_time) {
-        ALARM = true;
+void IRAM_ATTR handleRadarInterrupt() {
+    ALARM = true;
+}
 
-        last_photoelectric_interrupt_time = interruptTime;
-    }
+void IRAM_ATTR handleMicrophoneInterrupt() {
+    ALARM = true;
+}
+
+void IRAM_ATTR handleMovementInterrupt() {
+    ALARM = true;
 }
 
 #pragma endregion
@@ -669,6 +602,84 @@ void initial_setup(bool noFile) {
     save_tag();
 }
 
+// --------- TELEGRAM-BOT --------
+#pragma region telegram
+
+void handleNewMessages(int numNewMessages) {
+    Serial.print(LANGUAGE ? "Received " + String(numNewMessages) + " new messages." : String(numNewMessages) + " Neue Nachrichten erhalten.");
+
+    bool is_authorized = false;
+
+    for (int i=0; i<numNewMessages; i++) {
+        // Chat id of the requester
+        String chatID = String(bot.messages[i].chat_id);
+        for (int i = 0; i < sizeof(chat_ids); i++) {
+            if (chatID == chat_ids[i]) {
+                is_authorized = true;
+                break;
+            }
+        }
+
+        if (!is_authorized) bot.sendMessage(chatID, "Unauthorized user", "");
+        
+        // Print the received message
+        String text = bot.messages[i].text;
+
+        String from_name = bot.messages[i].from_name;
+
+        if (text == "/start") {
+        String welcome = "Willkommen, " + from_name + ".\n";
+        welcome += "Benutze einen der folgenden Befehle:\n\n";
+        welcome += "/status gibt einen Status-Bericht aus\n";
+        welcome += "/sensors gibt die aktuellen Sensor-werte aus\n\n";
+        welcome += "Funktionen, die einen RFID-Tag benötigen:\n";
+        welcome += "/arm aktiviert die Alarmanlage\n";
+        welcome += "/disarm deaktiviert die Alarmanlage\n";
+        welcome += "/deactivate stoppt einen aktivierten Alarm und deaktiviert die Alarmanlage";
+        bot.sendMessage(chatID, welcome, "");
+        }
+
+        
+        if (text == "/status") {
+            String activated = ARMED ? "Ja" : "Nein";
+
+            String message = "Status-Bericht: \n";
+            message += "Aktiviert: " + activated + " \n";
+            if (last_status_change != "") {message += "Letzte Status-Änderung: " + last_status_change + " \n";}
+            else {}
+            message += "Tags eingespeichert: " + String(tag_amount()) + "\n";
+            bot.sendMessage(chatID, message, "");
+        }
+        
+        if (text == "/sensors") {
+            String message = "Sensor-Werte: \n";
+            message += "Temperatur: " + String(temperature, 1) + " °C\n";
+            message += "Luftfeuchtigkeit: " + String(humidity, 0) + " %\n";
+            message += "Luftdruck: " + String(pressure, 2) + " hPa\n";
+            message += "Höhe: " + String(height, 2) + " m\n";
+            bot.sendMessage(chatID, message, "");
+        }
+    }
+}
+
+void sendLogMessage(String message) {
+    bot.sendMessage((String) *logging_chat_ids, message, "");
+}
+
+void getMessages() {
+    if (millis() > last_bot_refresh + bot_request_delay)  {
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    while(numNewMessages) {
+    handleNewMessages(numNewMessages);
+    numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    }
+    last_bot_refresh = millis();
+    }
+}
+
+#pragma endregion
+
 void setup() {
     // Initialisieren des Seriellen Monitors
     Serial.begin(115200);
@@ -679,7 +690,7 @@ void setup() {
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-        Serial.println(LANGUAGE ? "Connecting to WiFi..." : "Verbindung zu WiFi wird hergestellt...");
+        Serial.println(LANGUAGE ? ("Connecting to " + String(ssid) + "...") : ("Verbindung zu " + String(ssid) + " wird hergestellt..."));
     }
     Serial.println(LANGUAGE ? "Connected to WiFi" : "Mit WiFi verbunden");
 
@@ -741,16 +752,6 @@ void setup() {
 
     rfid_init();
 
-
-    //Serial.println("lcdJob");
-    //xTaskCreatePinnedToCore(lcdJob, "lcdJob", 16384, NULL, 1, &lcdTask, 1);
-    //delay(2000);
-    //Serial.println("sensorJob");
-    //xTaskCreatePinnedToCore(sensorJob, "sensorJob", 16384, NULL, 1, &sensorTask, 1);
-    //delay(2000);
-
-    //delay(10000);
-
     sendLogMessage("Startup finished.");
 
     Serial.println(LANGUAGE ? "Finished Setup" : "Einrichtung abgeschlossen");
@@ -762,29 +763,18 @@ void setup() {
 #pragma region loop
 
 void loop() {
-    Serial.println("telegram");
-    if (millis() > last_bot_refresh + bot_request_delay)  {
-    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    getMessages();
 
-    while(numNewMessages) {
-    handleNewMessages(numNewMessages);
-    numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    if (armTaskHandle != NULL) {
+        if(eTaskGetState(armTaskHandle) != eRunning) {
+            updateLCD();
+            delay(100);
+            updateSensorData();
+        }
     }
-    last_bot_refresh = millis();
-    }
-
-    Serial.println("lcdJob");
-    //xTaskCreatePinnedToCore(lcdJob, "lcdJob", 16384, NULL, 1, &lcdTask, 1);
-    updateLCD();
-
-    Serial.println("sensorJob");
-    //xTaskCreatePinnedToCore(sensorJob, "sensorJob", 16384, NULL, 1, &sensorTask, 1);
-    updateSensorData();
 
     //rtc_wdt_feed();
-    loop_ticks++;
-    Serial.println(loop_ticks);
-    delay(500);
+    delay(400);
 }
 
 #pragma endregion
