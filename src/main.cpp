@@ -159,6 +159,7 @@ bool ALARM = false;    // true = alarm ausgelöst
 bool LANGUAGE = false; // false = deutsch, true = englisch
 
 bool ALARM_TRIGGERED[4];
+bool PREVIOUS_ALARM[4];
 // 0 Bewegungsmelder-alarm
 // 1 radar-alarm
 // 2 Mikrofon-alarm
@@ -436,6 +437,8 @@ void armTaskHandle(void * pvParameters) {
             sendLogMessage("Alarmanlage erfolgreich deaktiviert.");
 
             ARMED = false;
+            ALARM_TRIGGERED[4] = { false };
+            PREVIOUS_ALARM[4] = { false };
             last_status_change = currentTime();
             detachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin));
             detachInterrupt(digitalPinToInterrupt(movement_sensor_pin));
@@ -448,18 +451,23 @@ void armTaskHandle(void * pvParameters) {
             if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
                 sendLogMessage("Alarmanlage wird aktiviert in " + String(alarm_activation_time) + " sekunden.");
                 for (int i = alarm_activation_time; i > 0; i--) {
-                    clearLine(2);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
                     String j = String(i);
                     if (sizeof(j) < 16) {j += " ";}
                     Serial.println(LANGUAGE ? ("Activating in " + j) : ("Alarmanlage wird aktiviert in " + j));
+                    clearLine(2);
+                    lcd.setCursor(0, 2);
                     lcd.print(LANGUAGE ? ("Activating in " + j) : ("Aktivierung in " + j));
                     digitalWrite(led_green_pin, !digitalRead(led_green_pin));
-                    vTaskDelay(pdMS_TO_TICKS(1000));
                 }
+                clearLine(2);
+                clearLine(3);
             } xSemaphoreGive(lcdMutex);
+            last_status_change = currentTime();
+        
+            digitalWrite(led_green_pin, LOW);
             digitalWrite(led_red_pin, HIGH);
             ARMED = true;
-            last_status_change = currentTime();
 
             attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
             attachInterrupt(digitalPinToInterrupt(movement_sensor_pin), &handleMovementInterrupt, RISING);
@@ -482,7 +490,6 @@ void armTaskHandle(void * pvParameters) {
     buttons_deactivated = false;
     armTask = NULL;
     vTaskDelete(NULL);
-
 }
 
 void resetTaskHandle(void * pvParameters) {
@@ -520,9 +527,17 @@ void resetTaskHandle(void * pvParameters) {
     } xSemaphoreGive(lcdMutex);
 
     if (tag_verified) {
+        detachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin));
+        detachInterrupt(digitalPinToInterrupt(movement_sensor_pin));
+        detachInterrupt(digitalPinToInterrupt(radar_sensor_pin));
+        detachInterrupt(digitalPinToInterrupt(microphone_pin));
+
         ARMED = false;
         ALARM = false;
         alarmMessageSent = false;
+
+        ALARM_TRIGGERED[4] = { false };
+        PREVIOUS_ALARM[4] = { false };
 
         digitalWrite(piezo_pin, LOW);
         digitalWrite(led_green_pin, HIGH);
@@ -537,22 +552,44 @@ void resetTaskHandle(void * pvParameters) {
             sendLogMessage("Alarmanlage wird reaktiviert in " + String(alarm_activation_time) + " sekunden.");
 
             for (int i = alarm_activation_time; i > 0; i--) {
-                clearLine(2);
                 String j = String(i);
                     if (sizeof(j) < 16) {j += " ";}
                 Serial.println(LANGUAGE ? ("Reactivating in " + j) : ("Reaktivierung in " + j));
+                clearLine(2);
+                lcd.setCursor(0, 2);
                 lcd.print(LANGUAGE ? ("Reactivating in " + j) : ("Reaktivierung in " + j));
                 digitalWrite(led_green_pin, !digitalRead(led_green_pin));
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
+            clearLine(2);
+            clearLine(3);
+
         } xSemaphoreGive(lcdMutex);
+
+        last_status_change = currentTime();
+
         digitalWrite(led_green_pin, LOW);
         digitalWrite(led_red_pin, HIGH);
         ARMED = true;
+
+        attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
+        attachInterrupt(digitalPinToInterrupt(movement_sensor_pin), &handleMovementInterrupt, RISING);
+        attachInterrupt(digitalPinToInterrupt(radar_sensor_pin), &handleRadarInterrupt, RISING);
+        attachInterrupt(digitalPinToInterrupt(microphone_pin), &handleMicrophoneInterrupt, FALLING);
+
+    }
+    else {
+        String message = LANGUAGE ? "Wrong tag!" : "Falscher Tag!";
+        if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
+            lcd.print(message);
+        } xSemaphoreGive(lcdMutex);
+        sendLogMessage(message);
+        Serial.println(message);
+        vTaskDelay(500);
     }
 
     buttons_deactivated = false;
-    armTask = NULL;
+    resetTask = NULL;
     vTaskDelete(NULL);
 }
 
@@ -614,18 +651,45 @@ void updateLCD() {
             if (!alarmMessageSent) {
                 Serial.println(LANGUAGE ? "Alarm triggered!" : "Alarm ausgelöst!");
                 sendLogMessage("ALARM AUSGELÖST!!!");
-                sendLogMessage(message);
-                Serial.println(message);
                 alarmMessageSent = true;
 
                 clearLine(2);
                 lcd.setCursor(0, 2);
                 lcd.print(LANGUAGE ? "ALARM TRIGGERED" : "  ALARM AUSGELOEST  ");
             }
-            
+
             clearLine(3);
             lcd.setCursor(0, 3);
             lcd.print(message);
+
+            bool newAlarmTriggered = false;
+            message = "";
+            for (int i = 0; i < sizeof(ALARM_TRIGGERED); i++) {
+                if (ALARM_TRIGGERED[i] && !PREVIOUS_ALARM[i]) {
+                    newAlarmTriggered = true;
+                    PREVIOUS_ALARM[i] = true;
+
+                    switch (i) {
+                        case 0:
+                        message += "Bewegungsmelder ";
+                        break;
+                    case 1:
+                        message += "Radar ";
+                        break;
+                    case 2:
+                        message += "Mikrofon ";
+                        break;
+                    case 3:
+                        message += "Lichtschranke";
+                        break;
+                    }
+                }
+            }
+
+            if (newAlarmTriggered) {
+                sendLogMessage("Neuer Alarm ausgelöst: " + message);
+                Serial.println("Neuer Alarm ausgelöst: " + message);
+            }
         }
     } xSemaphoreGive(lcdMutex);
 }
