@@ -145,6 +145,7 @@ esp_timer_handle_t timer_handle_fast;         // alle 100ms
 
 // Semaphoren
 SemaphoreHandle_t i2cMutex;
+SemaphoreHandle_t lcdMutex;
 SemaphoreHandle_t telegramMutex;
 //std::mutex telegram_mtx;
 //std::mutex i2c_mtx;
@@ -265,13 +266,13 @@ void rfid_init() {
 
 void saveTagTaskHandle(void * pvParameters) {
 
-    if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+    if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
         lcd.setCursor(0, 2);
         lcd.print(LANGUAGE ? "Please hold an RFID" : " Bitte den RFID-Tag ");
         lcd.setCursor(0, 3);
         lcd.print(LANGUAGE ? "tag to the reader!" : "an den Leser halten!");
     }
-    xSemaphoreGive(i2cMutex);
+    xSemaphoreGive(lcdMutex);
 
     for (;;) {
         // Überprüfen, ob eine RFID-Karte vorhanden ist
@@ -291,28 +292,28 @@ void saveTagTaskHandle(void * pvParameters) {
                 whitelistFile.close();
                 Serial.println(LANGUAGE ? "Tag saved successfully." : "Tag erfolgreich gespeichert.");
 
-                if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+                if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
                     clearLine(2);
                     clearLine(3);
                     lcd.setCursor(0, 2);
                     lcd.print(LANGUAGE ? "RFID-Tag saved." : "RFID-Tag gespeichert");
                 }
-                xSemaphoreGive(i2cMutex);
+                xSemaphoreGive(lcdMutex);
                 delay(1000);
-                if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+                if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
                     clearLine(2);
                     clearLine(3);
                 }
-                xSemaphoreGive(i2cMutex);
+                xSemaphoreGive(lcdMutex);
             } else {
                 Serial.println(LANGUAGE ? "Failed to open whitelist file for writing." : "Fehler beim Öffnen der Whitelist-Datei zum Schreiben.");
-                if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+                if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
                     clearLine(2);
                     clearLine(3);
                     lcd.setCursor(0, 2);
                     lcd.print(LANGUAGE ? "Error while saving!" : "Fehler beim Speichern!");
                 }
-                xSemaphoreGive(i2cMutex);
+                xSemaphoreGive(lcdMutex);
             }
             buttons_deactivated = false;
             saveTagTask = NULL;
@@ -393,44 +394,44 @@ void armTaskHandle(void * pvParameters) {
     Serial.println(action_message + process_message);
     Serial.println(rfid_message);
 
-    if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+    if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
         clearLine(2);
         lcd.setCursor(0, 2);
         lcd.print(LANGUAGE ? "Please hold RFID-tag" : "Bitte RFID-Tag an");
         clearLine(3);
         lcd.setCursor(0, 3);
         lcd.print(LANGUAGE ? "on the reader." : "den Leser halten");
-    } xSemaphoreGive(i2cMutex);
+    } xSemaphoreGive(lcdMutex);
 
     bool tag_verified = search_tag();
 
-    if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+    if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
         clearLine(2);
         clearLine(3);
         lcd.setCursor(0,2);
     }
-    xSemaphoreGive(i2cMutex);
+    xSemaphoreGive(lcdMutex);
 
     if (tag_verified) {
         String message = LANGUAGE ? "Tag verified." : "Tag verifiziert.";
         sendLogMessage(message);
-        if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+        if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
             lcd.print(message);
             Serial.println(message);
-        } xSemaphoreGive(i2cMutex);
+        } xSemaphoreGive(lcdMutex);
 
         vTaskDelay(pdMS_TO_TICKS(500));
 
-        if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+        if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
             clearLine(2);
             clearLine(3);
             lcd.setCursor(0, 2);
-        } xSemaphoreGive(i2cMutex);
+        } xSemaphoreGive(lcdMutex);
 
         if (ARMED) {
-            if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+            if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
                 lcd.print(LANGUAGE ? "Disarmed." : "Deaktiviert.");
-            } xSemaphoreGive(i2cMutex);
+            } xSemaphoreGive(lcdMutex);
             Serial.println(LANGUAGE ? "Alarm system disarmed." : "Alarmanlage erfolgreich deaktiviert.");
             sendLogMessage("Alarmanlage erfolgreich deaktiviert.");
 
@@ -444,16 +445,18 @@ void armTaskHandle(void * pvParameters) {
             digitalWrite(led_red_pin, LOW);
         }
         else {
-            if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+            if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
                 sendLogMessage("Alarmanlage wird aktiviert in " + String(alarm_activation_time) + " sekunden.");
                 for (int i = alarm_activation_time; i > 0; i--) {
                     clearLine(2);
-                    Serial.println(LANGUAGE ? ("Activating in " + String(i)) : ("Alarmanlage wird aktiviert in " + String(i)));
-                    lcd.print(LANGUAGE ? ("Activating in " + String(i)) : ("Aktivierung in " + String(i)));
+                    String j = String(i);
+                    if (sizeof(j) < 16) {j += " ";}
+                    Serial.println(LANGUAGE ? ("Activating in " + j) : ("Alarmanlage wird aktiviert in " + j));
+                    lcd.print(LANGUAGE ? ("Activating in " + j) : ("Aktivierung in " + j));
                     digitalWrite(led_green_pin, !digitalRead(led_green_pin));
                     vTaskDelay(pdMS_TO_TICKS(1000));
                 }
-            } xSemaphoreGive(i2cMutex);
+            } xSemaphoreGive(lcdMutex);
             digitalWrite(led_red_pin, HIGH);
             ARMED = true;
             last_status_change = currentTime();
@@ -468,9 +471,9 @@ void armTaskHandle(void * pvParameters) {
     }
     else {
         String message = LANGUAGE ? "Wrong tag!" : "Falscher Tag!";
-        if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+        if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
             lcd.print(message);
-        } xSemaphoreGive(i2cMutex);
+        } xSemaphoreGive(lcdMutex);
         sendLogMessage(message);
         Serial.println(message);
         vTaskDelay(500);
@@ -485,6 +488,13 @@ void armTaskHandle(void * pvParameters) {
 void resetTaskHandle(void * pvParameters) {
     Serial.println(LANGUAGE ? "Started Resetting process on core" + String(xPortGetCoreID()) : "Alarmstoppungs-Prozess startet auf Core" + String(xPortGetCoreID()));
 
+    if (!ALARM) {
+        Serial.println(LANGUAGE ? "No Alarm active!" : "Kein Alarm aktiv!");
+        sendLogMessage("Kein Alarm aktiv!");
+        armTask = NULL;
+        vTaskDelete(NULL);
+    }
+
     String action_message = ARMED ? (LANGUAGE ? "Disarming ": "Deaktivierungs") : (LANGUAGE ? "Arming " : "Aktivierungs");
     String process_message = LANGUAGE ? " process started" : "-prozess gestartet";
     String rfid_message = LANGUAGE ? "Hold your RFID-tag on the reader to confirm!" : "Bitte RFID-Tag an den Leser halten zur Bestätigung!";
@@ -492,22 +502,22 @@ void resetTaskHandle(void * pvParameters) {
     Serial.println(action_message + process_message);
     Serial.println(rfid_message);
 
-    if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+    if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
         clearLine(2);
         lcd.setCursor(0, 2);
         lcd.print(LANGUAGE ? "Please hold RFID-tag" : "Bitte RFID-Tag an");
         clearLine(3);
         lcd.setCursor(0, 3);
         lcd.print(LANGUAGE ? "on the reader." : "den Leser halten");
-    } xSemaphoreGive(i2cMutex);
+    } xSemaphoreGive(lcdMutex);
 
     bool tag_verified = search_tag();
 
-    if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+    if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
         clearLine(2);
         clearLine(3);
         lcd.setCursor(0,2);
-    } xSemaphoreGive(i2cMutex);
+    } xSemaphoreGive(lcdMutex);
 
     if (tag_verified) {
         ARMED = false;
@@ -518,7 +528,7 @@ void resetTaskHandle(void * pvParameters) {
         digitalWrite(led_green_pin, HIGH);
         digitalWrite(led_red_pin, LOW);
 
-        if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
+        if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
             lcd.clear();
 
             clearLine(2);
@@ -528,11 +538,14 @@ void resetTaskHandle(void * pvParameters) {
 
             for (int i = alarm_activation_time; i > 0; i--) {
                 clearLine(2);
-                Serial.println(LANGUAGE ? ("Reactivating in " + String(i)) : ("Reaktivierung in " + String(i)));
+                String j = String(i);
+                    if (sizeof(j) < 16) {j += " ";}
+                Serial.println(LANGUAGE ? ("Reactivating in " + j) : ("Reaktivierung in " + j));
+                lcd.print(LANGUAGE ? ("Reactivating in " + j) : ("Reaktivierung in " + j));
                 digitalWrite(led_green_pin, !digitalRead(led_green_pin));
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
-        } xSemaphoreGive(i2cMutex);
+        } xSemaphoreGive(lcdMutex);
         digitalWrite(led_green_pin, LOW);
         digitalWrite(led_red_pin, HIGH);
         ARMED = true;
@@ -564,53 +577,57 @@ void outputJob(void * pvParameters) {
 // lcd-aktualisierung und alarm
 void updateLCD() {
     IPAddress ip = WiFi.localIP();
-    //if (xSemaphoreTake(i2cMutex ,portMAX_DELAY)) {
-    
-    // Zeile 1: aktuelle Zeit
-    lcd.setCursor(0, 0);
-    lcd.print(currentTime());
+    if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
+        // Zeile 1: aktuelle Zeit
+        lcd.setCursor(0, 0);
+        lcd.print(currentTime());
 
-    // Zeile 2: Status
-    clearLine(1);
-    lcd.setCursor(0, 1);
-    switch (status) {
-        case 0:
-            lcd.print(String(temperature));
-            lcd.print("C, ");
-            lcd.print(String(humidity));
-            lcd.print("%");
-            break;
-        case 1:
-            lcd.print("IP: ");
-            lcd.print(ip.toString());
-            break;
-        case 2:
-            lcd.print(String(pressure));
-            lcd.print("hPa , ");
-            lcd.print(String(height));
-            lcd.print("m");
-            break;
-    }
-
-    if (ALARM & ARMED) {
-        if (!alarmMessageSent) {
-            Serial.println(LANGUAGE ? "Alarm triggered!" : "Alarm ausgelöst!");
-            sendLogMessage("ALARM AUSGELÖST!!!");
-            alarmMessageSent = true;
-
-            clearLine(2);
-            lcd.setCursor(0, 2);
-            lcd.print(LANGUAGE ? "ALARM TRIGGERED" : "  ALARM AUSGELOEST  ");
+        // Zeile 2: Status
+        clearLine(1);
+        lcd.setCursor(0, 1);
+        switch (status) {
+            case 0:
+                lcd.print(String(temperature));
+                lcd.print("C, ");
+                lcd.print(String(humidity));
+                lcd.print("%");
+                break;
+            case 1:
+                lcd.print("IP: ");
+                lcd.print(ip.toString());
+                break;
+            case 2:
+                lcd.print(String(pressure));
+                lcd.print("hPa, ");
+                lcd.print(String(height));
+                lcd.print("m");
+                break;
         }
-        String message;
-        if (ALARM_TRIGGERED[0]) message += "MOV "; // Movement = Bewegung
-        if (ALARM_TRIGGERED[1]) message += "RAD "; // Radar
-        if (ALARM_TRIGGERED[2]) message += "MIC "; // Microphone = Mikrofon
-        if (ALARM_TRIGGERED[3]) message += "BEAM"; // Beam = Lichtschranke
-        clearLine(3);
-        lcd.setCursor(0, 3);
-        lcd.print(message);
-    }
+
+        if (ALARM & ARMED) {
+            String message;
+            if (ALARM_TRIGGERED[0]) message += "MOV "; // Movement = Bewegung
+            if (ALARM_TRIGGERED[1]) message += "RAD "; // Radar
+            if (ALARM_TRIGGERED[2]) message += "MIC "; // Microphone = Mikrofon
+            if (ALARM_TRIGGERED[3]) message += "BEAM"; // Beam = Lichtschranke
+
+            if (!alarmMessageSent) {
+                Serial.println(LANGUAGE ? "Alarm triggered!" : "Alarm ausgelöst!");
+                sendLogMessage("ALARM AUSGELÖST!!!");
+                sendLogMessage(message);
+                Serial.println(message);
+                alarmMessageSent = true;
+
+                clearLine(2);
+                lcd.setCursor(0, 2);
+                lcd.print(LANGUAGE ? "ALARM TRIGGERED" : "  ALARM AUSGELOEST  ");
+            }
+            
+            clearLine(3);
+            lcd.setCursor(0, 3);
+            lcd.print(message);
+        }
+    } xSemaphoreGive(lcdMutex);
 }
 
 void updateBMP280Data() {
@@ -811,6 +828,22 @@ void handleNewMessages(int numNewMessages) {
             }
         }
 
+        // Abbrechen eines Alarms
+        else if (text == "/deactivate") {
+            if (ALARM == true) {
+                if (armTask == NULL) {
+                    bot.sendMessage(chatID, "Bitte RFID-Tag an leser halten! \n weitere Instruktionen werden auf dem LCD-Display erscheinen.", "");
+                    xTaskCreatePinnedToCore(resetTaskHandle, "resetTask", 5000, NULL, 0, &resetTask, 0);
+                }
+                else {
+                    bot.sendMessage(chatID, "Alarm wird bereits beendet!", "");
+                }
+            }
+            else {
+                bot.sendMessage(chatID, "Kein Alarm ausgelöst!", "");
+            }
+        }
+
         else {
             bot.sendMessage(chatID, "Unbekannter befehl!", "");
         }
@@ -892,9 +925,11 @@ void setup() {
 
     // Semaphoren
     i2cMutex = xSemaphoreCreateMutex();
-    if (i2cMutex == NULL) {Serial.println(LANGUAGE ? "Error while creating LCD-Semaphore" : "Fehler beim Erstellen der LCD-Semaphore");}
+    if (i2cMutex == NULL) {Serial.println(LANGUAGE ? "Error while creating I2C-Semaphore" : "Fehler beim Erstellen der I2C-Semaphore");}
+    lcdMutex = xSemaphoreCreateMutex();
+    if (lcdMutex == NULL) {Serial.println(LANGUAGE ? "Error while creating LCD-Semaphore" : "Fehler beim Erstellen der LCD-Semaphore");}
     telegramMutex = xSemaphoreCreateMutex();
-    if (telegramMutex == NULL) {Serial.println(LANGUAGE ? "Error while creating LCD-Semaphore" : "Fehler beim Erstellen der LCD-Semaphore");}
+    if (telegramMutex == NULL) {Serial.println(LANGUAGE ? "Error while creating Telegram-Semaphore" : "Fehler beim Erstellen der Telegram-Semaphore");}
     
     // Buttons als input konfigurieren
     pinMode(arm_button_pin, INPUT_PULLUP);
@@ -904,6 +939,9 @@ void setup() {
     pinMode(language_button_pin, INPUT_PULLUP);
 
     pinMode(photoelectric_sensor_pin, INPUT);
+    pinMode(radar_sensor_pin, INPUT);
+    pinMode(microphone_pin, INPUT);
+    pinMode(movement_sensor_pin, INPUT);
 
     // Interrupts für Buttons hinzufügen
     attachInterrupt(digitalPinToInterrupt(arm_button_pin), &handleArmButtonInterrupt, FALLING);
@@ -919,7 +957,7 @@ void setup() {
 
     digitalWrite(piezo_pin, LOW);
     digitalWrite(led_red_pin, LOW);
-    digitalWrite(led_green_pin, LOW);
+    digitalWrite(led_green_pin, HIGH);
 
     // Initialisieren des I2C-Busses
     Wire.begin(mainSDA, mainSCL);
@@ -990,16 +1028,12 @@ void loop() {
 
     // alle 2 Sekunden
     if (timer_100ms_count % 20 == 0) {
-        //if (dht11Task == NULL) {
-            //xTaskCreatePinnedToCore(dht11TaskHandle, "dht11Task", 8192, NULL, 0, &dht11Task, 0);
-        //}
+        if (armTask == NULL && resetTask == NULL && saveTagTask == NULL) updateLCD();
     }
 
     // jede sekunde
     if (timer_100ms_count % 10 == 0) {
         updateBMP280Data();
-        if (armTask == NULL) updateLCD();
-        //else if (eTaskGetState(armTask) != eRunning) updateLCD();
     }
 }
 
