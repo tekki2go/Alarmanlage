@@ -1,18 +1,4 @@
 // Alarmanlage by Marc Heß, Copyright (C) 2024
-/*
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
 
 #pragma region includes
 
@@ -48,8 +34,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Netzwerkdaten
 // zuhause
-const char* ssid = "tkNOC_IoT";
-const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
+//const char* ssid = "tkNOC_IoT";
+//const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
 
 // Laptop
 //const char* ssid = "WIN-452L88FNHCT 3783";
@@ -58,6 +44,10 @@ const char* password = "Q9ya&RUxDuVw&A$$w4ZNmkQMNTyKE9ZU";
 // Handy
 //const char* ssid = "Eierfon 13";
 //const char* password = "xQA_52Le";
+
+// Klassenzimmer
+const char* ssid = "IoT_Elektro";
+const char* password = "DIoT-UadKASmS";
 
 // Token des Telegram-bots
 const char* bot_token = "6923232009:AAGqJnmC9oe915CyHLO3OMCKHy9U8muVG1Q";
@@ -69,7 +59,7 @@ String chat_ids[] = {
 };
 
 // Leiser Modus (deaktiviert Buzzer)
-bool silent = true;
+bool silent = false;
 
 #pragma endregion
 
@@ -239,6 +229,24 @@ void dht11Task() {
         temperature = new_temperature;
         humidity = new_humidity;
     }
+}
+
+void attachInterrupts() {
+    attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
+    attachInterrupt(digitalPinToInterrupt(movement_sensor_pin), &handleMovementInterrupt, RISING);
+    attachInterrupt(digitalPinToInterrupt(radar_sensor_pin), &handleRadarInterrupt, RISING);
+    attachInterrupt(digitalPinToInterrupt(microphone_pin), &handleMicrophoneInterrupt, FALLING);
+}
+
+void detachInterrupts() {
+    detachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin));
+    detachInterrupt(digitalPinToInterrupt(movement_sensor_pin));
+    detachInterrupt(digitalPinToInterrupt(radar_sensor_pin));
+    detachInterrupt(digitalPinToInterrupt(microphone_pin));
+}
+
+void resetAlarms() {
+    
 }
 
 // --------- RFID ---------
@@ -437,15 +445,21 @@ void armTaskHandle(void * pvParameters) {
             sendLogMessage("Alarmanlage erfolgreich deaktiviert.");
 
             ARMED = false;
-            ALARM_TRIGGERED[4] = { false };
-            PREVIOUS_ALARM[4] = { false };
+            // ALARM_TRIGGERED[4] = { false };
+            // PREVIOUS_ALARM[4] = { false };
+            
+            for (auto& alarm : ALARM_TRIGGERED) {
+                alarm = false;
+            }
+            for (auto& alarm : PREVIOUS_ALARM) {
+                alarm = false;
+            }
+            
             last_status_change = currentTime();
-            detachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin));
-            detachInterrupt(digitalPinToInterrupt(movement_sensor_pin));
-            detachInterrupt(digitalPinToInterrupt(radar_sensor_pin));
-            detachInterrupt(digitalPinToInterrupt(microphone_pin));
+            detachInterrupts();
             digitalWrite(led_green_pin, HIGH);
             digitalWrite(led_red_pin, LOW);
+            digitalWrite(piezo_pin, LOW);
         }
         else {
             if (xSemaphoreTake(lcdMutex ,portMAX_DELAY)) {
@@ -469,10 +483,7 @@ void armTaskHandle(void * pvParameters) {
             digitalWrite(led_red_pin, HIGH);
             ARMED = true;
 
-            attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
-            attachInterrupt(digitalPinToInterrupt(movement_sensor_pin), &handleMovementInterrupt, RISING);
-            attachInterrupt(digitalPinToInterrupt(radar_sensor_pin), &handleRadarInterrupt, RISING);
-            attachInterrupt(digitalPinToInterrupt(microphone_pin), &handleMicrophoneInterrupt, FALLING);
+            attachInterrupts();
         }
         String last_status_change = currentTime();
         
@@ -527,14 +538,18 @@ void resetTaskHandle(void * pvParameters) {
     } xSemaphoreGive(lcdMutex);
 
     if (tag_verified) {
-        detachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin));
-        detachInterrupt(digitalPinToInterrupt(movement_sensor_pin));
-        detachInterrupt(digitalPinToInterrupt(radar_sensor_pin));
-        detachInterrupt(digitalPinToInterrupt(microphone_pin));
+        detachInterrupts();
 
         ARMED = false;
         ALARM = false;
         alarmMessageSent = false;
+
+        for (auto& alarm : ALARM_TRIGGERED) {
+            alarm = false;
+        }
+        for (auto& alarm : PREVIOUS_ALARM) {
+            alarm = false;
+        }
 
         ALARM_TRIGGERED[4] = { false };
         PREVIOUS_ALARM[4] = { false };
@@ -572,10 +587,7 @@ void resetTaskHandle(void * pvParameters) {
         digitalWrite(led_red_pin, HIGH);
         ARMED = true;
 
-        attachInterrupt(digitalPinToInterrupt(photoelectric_sensor_pin), &handlePhotoelectricInterrupt, RISING);
-        attachInterrupt(digitalPinToInterrupt(movement_sensor_pin), &handleMovementInterrupt, RISING);
-        attachInterrupt(digitalPinToInterrupt(radar_sensor_pin), &handleRadarInterrupt, RISING);
-        attachInterrupt(digitalPinToInterrupt(microphone_pin), &handleMicrophoneInterrupt, FALLING);
+        attachInterrupts();
 
     }
     else {
@@ -593,7 +605,8 @@ void resetTaskHandle(void * pvParameters) {
     vTaskDelete(NULL);
 }
 
-// läuft immer
+// laufen immer
+// Outputs (LEDs, Piezo)
 void outputJob(void * pvParameters) {
     uint counter = 0;
     for (;;) {
@@ -606,8 +619,8 @@ void outputJob(void * pvParameters) {
             digitalWrite(led_red_pin, !digitalRead(led_red_pin));
 
             counter++;
-            delay(500);
         }
+        delay(500);
     }
 }
 
@@ -1061,7 +1074,7 @@ void setup() {
 
     rfid_init();
 
-    xTaskCreatePinnedToCore(outputJob, "outputJob", 8192, NULL, 0, &outputTask, 0);
+    xTaskCreatePinnedToCore(outputJob, "outputJob", 4096, NULL, 0, &outputTask, 0);
 
     const esp_timer_create_args_t timer_100ms_args = {
         .callback = &timer_100ms_callback,
@@ -1071,7 +1084,7 @@ void setup() {
     esp_timer_create(&timer_100ms_args, &timer_handle_fast);
     esp_timer_start_periodic(timer_handle_fast, 100000); // 100ms
 
-    sendLogMessage("Startup finished.");
+    sendLogMessage("Einrichtung abgeschlossen.");
 
     Serial.println(LANGUAGE ? "Finished Setup" : "Einrichtung abgeschlossen");
 }
@@ -1093,6 +1106,7 @@ void loop() {
     // alle 2 Sekunden
     if (timer_100ms_count % 20 == 0) {
         if (armTask == NULL && resetTask == NULL && saveTagTask == NULL) updateLCD();
+
     }
 
     // jede sekunde
