@@ -1,4 +1,4 @@
-// Alarmanlage by Marc Heß, Copyright (C) 2024
+// Alarmanlage by Marc Heß
 
 #pragma region includes
 
